@@ -11,7 +11,14 @@ import {
   writeTextFile,
 } from "../common/file-utils";
 import { executeValidatedTool } from "../common/validate";
-import { getFileState, isAbsoluteFilePath, isFullFileView, normalizeFilePath, recordFileState } from "../common/state";
+import {
+  createFullFileSnippet,
+  getFileState,
+  isAbsoluteFilePath,
+  isFullFileView,
+  normalizeFilePath,
+  recordFileState,
+} from "../common/state";
 
 const writeSchema = z.strictObject({
   file_path: z.string().min(1, "file_path is required."),
@@ -117,6 +124,13 @@ export async function handleWriteTool(
           },
           { incrementVersion: true }
         );
+        const snippet = createFullFileSnippet(
+          context.sessionId,
+          filePath,
+          1,
+          freshMetadata.content.split("\n").length,
+          freshMetadata.content
+        );
 
         return {
           ok: true,
@@ -129,6 +143,14 @@ export async function handleWriteTool(
             encoding: freshMetadata.encoding,
             line_endings: freshMetadata.lineEndings,
             cache_refreshed: true,
+            ...(snippet && {
+              snippet: {
+                id: snippet.id,
+                filePath: snippet.filePath,
+                startLine: snippet.startLine,
+                endLine: snippet.endLine,
+              },
+            }),
             diff_preview: diffPreview,
             ...repairMetadata,
           },
