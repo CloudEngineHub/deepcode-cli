@@ -643,7 +643,7 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
           properties: {
             snippet_id: {
               type: "string",
-              description: "Required Read/Edit snippet_id.",
+              description: "Required Read/Write/Edit snippet_id.",
             },
             file_path: {
               type: "string",

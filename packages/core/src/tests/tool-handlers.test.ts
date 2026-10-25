@@ -16,6 +16,13 @@ import { handleReadTool } from "../tools/read-handler";
 import { handleSkillTool } from "../tools/skill-handler";
 import { handleUpdatePlanTool } from "../tools/update-plan-handler";
 import { handleWriteTool } from "../tools/write-handler";
+import {
+  clearSessionState,
+  getFileState,
+  getFileVersion,
+  getSnippet,
+  rebuildSessionStateFromHistory,
+} from "../common/state";
 
 const tempDirs: string[] = [];
 
@@ -1212,6 +1219,121 @@ test("Write repairs JSON object content for .json files", async () => {
   assert.equal(writeResult.metadata?.input_repaired, true);
   assert.match(String(writeResult.metadata?.diff_preview ?? ""), /\+\s*"name": "demo"|^\+\{/m);
   assert.equal(fs.readFileSync(filePath, "utf8"), ["{", '  "name": "demo",', '  "private": true', "}"].join(os.EOL));
+});
+
+for (const content of ["alpha\nbeta", "alpha\nbeta\n", ""]) {
+  test(`Write returns a full-file snippet usable by Edit for ${JSON.stringify(content)}`, async () => {
+    const workspace = createTempWorkspace();
+    const filePath = path.join(workspace, "note.txt");
+    const sessionId = `write-snippet-${JSON.stringify(content)}`;
+    const context = createContext(sessionId, workspace);
+    const writeResult = await handleWriteTool({ file_path: filePath, content }, context);
+
+    assert.equal(writeResult.ok, true);
+    const snippet = writeResult.metadata?.snippet as { id: string };
+    assert.ok(snippet?.id);
+    assert.deepEqual(snippet, {
+      id: snippet.id,
+      filePath,
+      startLine: 1,
+      endLine: content.split("\n").length,
+    });
+    assert.equal(getSnippet(sessionId, snippet.id)?.scopeType, "full");
+    assert.equal(getSnippet(sessionId, snippet.id)?.fileVersion, getFileVersion(sessionId, filePath));
+
+    const editResult = await handleEditTool(
+      { snippet_id: snippet.id, old_string: content ? "beta" : "", new_string: "gamma" },
+      context
+    );
+    assert.equal(editResult.ok, true, editResult.error);
+    assert.equal(
+      fs.readFileSync(filePath, "utf8"),
+      (content ? content.replace("beta", "gamma") : "gamma").replace(/\n/g, os.EOL)
+    );
+  });
+}
+
+test("Write returns a current full-file snippet after overwriting a CRLF file", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "note.txt");
+  const sessionId = "write-overwrite-snippet";
+  const context = createContext(sessionId, workspace);
+  fs.writeFileSync(filePath, "before\r\n");
+  const read = await handleReadTool({ file_path: filePath }, context);
+  assert.equal(read.ok, true);
+  const oldSnippet = read.metadata?.snippet as { id: string };
+  const oldVersion = getFileVersion(sessionId, filePath);
+
+  const write = await handleWriteTool({ file_path: filePath, content: "alpha\r\nbeta\r\nlast\r\n" }, context);
+  assert.equal(write.ok, true);
+  const snippet = write.metadata?.snippet as { id: string; endLine: number };
+  assert.ok(snippet?.id);
+  assert.notEqual(snippet.id, oldSnippet.id);
+  assert.equal(snippet.endLine, 4);
+  assert.equal(getSnippet(sessionId, snippet.id)?.fileVersion, oldVersion + 1);
+  const edit = await handleEditTool({ snippet_id: snippet.id, old_string: "last", new_string: "updated" }, context);
+  assert.equal(edit.ok, true, edit.error);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\r\nbeta\r\nupdated\r\n");
+});
+
+for (const legacy of [false, true]) {
+  test(`Write history restores file state${legacy ? " without legacy snippet metadata" : " and usable snippet IDs"}`, async () => {
+    const workspace = createTempWorkspace();
+    const filePath = path.join(workspace, "note.txt");
+    const sessionId = `write-history-${legacy}`;
+    const context = createContext(sessionId, workspace);
+    const firstWrite = await handleWriteTool({ file_path: filePath, content: "before" }, context);
+    const write = await handleWriteTool({ file_path: filePath, content: "alpha\nbeta\n" }, context);
+    assert.equal(firstWrite.ok, true);
+    assert.equal(write.ok, true);
+    const snippet = write.metadata?.snippet as { id: string };
+    assert.ok(snippet?.id);
+    const version = getFileVersion(sessionId, filePath);
+    const history = [firstWrite, write].map((result) => {
+      const metadata = { ...result.metadata };
+      if (legacy) delete metadata.snippet;
+      return { role: "tool", content: JSON.stringify({ ...result, metadata }) };
+    });
+
+    clearSessionState(sessionId);
+    rebuildSessionStateFromHistory(sessionId, history);
+    assert.equal(getFileState(sessionId, filePath)?.content, "alpha\nbeta\n");
+    assert.equal(getFileVersion(sessionId, filePath), version);
+    if (legacy) {
+      assert.equal(getSnippet(sessionId, snippet.id), null);
+    } else {
+      assert.equal(getSnippet(sessionId, snippet.id)?.fileVersion, version);
+      assert.equal(getSnippet(sessionId, snippet.id)?.scopeType, "full");
+      const edit = await handleEditTool({ snippet_id: snippet.id, old_string: "beta", new_string: "gamma" }, context);
+      assert.equal(edit.ok, true, edit.error);
+      assert.equal(fs.readFileSync(filePath, "utf8"), `alpha${os.EOL}gamma${os.EOL}`);
+    }
+
+    const nextWrite = await handleWriteTool({ file_path: filePath, content: "next" }, context);
+    assert.equal(nextWrite.ok, true);
+    if (!legacy) {
+      const nextSnippet = nextWrite.metadata?.snippet as { id: string };
+      assert.notEqual(nextSnippet.id, snippet.id);
+      assert.notEqual(nextSnippet.id, (firstWrite.metadata?.snippet as { id: string }).id);
+      assert.ok(getSnippet(sessionId, snippet.id));
+    }
+  });
+}
+
+test("Edit rejects external file changes after Write returns a snippet", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "note.txt");
+  const context = createContext("write-snippet-external-change", workspace);
+  const write = await handleWriteTool({ file_path: filePath, content: "alpha\nbeta\n" }, context);
+  assert.equal(write.ok, true);
+  const snippet = write.metadata?.snippet as { id: string };
+  fs.writeFileSync(filePath, "external change\n");
+  const futureTime = new Date(Date.now() + 2000);
+  fs.utimesSync(filePath, futureTime, futureTime);
+  const edit = await handleEditTool({ snippet_id: snippet.id, old_string: "beta", new_string: "gamma" }, context);
+  assert.equal(edit.ok, false);
+  assert.match(edit.error ?? "", /File has been modified/);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "external change\n");
 });
 
 test("Edit requires snippet_id even after Write refreshes file state", async () => {
