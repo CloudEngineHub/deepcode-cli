@@ -28,6 +28,7 @@ test("buildSlashCommands prefixes skills before built-ins", () => {
     "resume",
     "fork",
     "continue",
+    "compact",
     "undo",
     "mcp",
     "raw",
@@ -128,6 +129,14 @@ test("findExactSlashCommand returns built-in /undo", () => {
   const item = findExactSlashCommand(items, "/undo");
   assert.ok(item);
   assert.equal(item?.kind, "undo");
+});
+
+test("/compact is suggested and the built-in takes precedence over a skill with the same name", () => {
+  const items = buildSlashCommands([{ name: "compact", path: "/skills/compact/SKILL.md", description: "A skill" }]);
+  assert.ok(filterSlashCommands(items, "/comp").some((item) => item.kind === "compact"));
+  const command = findExactSlashCommand(items, "/compact");
+  assert.equal(command?.kind, "compact");
+  assert.equal(command?.description, "Compact the current conversation");
 });
 
 test("findExactSlashCommand returns built-in /skills", () => {

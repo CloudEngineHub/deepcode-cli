@@ -55,6 +55,7 @@ function fixture(history: SessionMessage[], respond: (request: any, call: number
   process.env.HOME = root;
   process.env.USERPROFILE = root;
   const requests: any[] = [];
+  const notices: SessionMessage[] = [];
   const settings = {
     model: "test-vision",
     contextWindow: 256 * 1024,
@@ -79,7 +80,7 @@ function fixture(history: SessionMessage[], respond: (request: any, call: number
     }),
     getResolvedSettings: () => settings,
     renderMarkdown: (text) => text,
-    onAssistantMessage: () => {},
+    onAssistantMessage: (message) => notices.push(message),
   });
   const internal = manager as any;
   internal.saveSessionMessages("compact-test", history);
@@ -87,6 +88,7 @@ function fixture(history: SessionMessage[], respond: (request: any, call: number
     manager,
     internal,
     requests,
+    notices,
     settings,
     root,
     read: () => manager.listSessionMessages("compact-test"),
@@ -99,6 +101,39 @@ function compactPrefixes(history: SessionMessage[], prices: number[], retain: nu
   const selection = selectPrefixes(history, prices, retain);
   return selection.ends.map((end) => selection.history.slice(0, end));
 }
+
+test("manual compaction reports whether it changed history", async () => {
+  const empty = fixture([]);
+  assert.equal(await empty.compact(), false);
+  assert.equal(empty.requests.length, 0);
+  assert.deepEqual(
+    empty.notices.map((item) => item.content),
+    ["Compacting conversation..."]
+  );
+  const short = fixture([message("only")]);
+  assert.equal(await short.compact(), false);
+  assert.equal(short.requests.length, 0);
+  const history = [message("older"), message("reply", "assistant"), message("tail")];
+  const ready = fixture(history);
+  assert.equal(await ready.compact(), true);
+  assert.equal(ready.requests.length, 1);
+  assert.deepEqual(
+    ready.notices.map((item) => [item.role, item.content]),
+    [
+      ["assistant", "Compacting conversation..."],
+      ["user", "Conversation compacted."],
+    ]
+  );
+  assert.ok(ready.notices.every((notice) => !ready.read().some((item) => item.id === notice.id)));
+  assert.deepEqual(
+    ready
+      .read()
+      .filter((item) => item.visible)
+      .map((item) => item.id),
+    history.map((item) => item.id)
+  );
+  assert.equal(ready.read().find((item) => item.meta?.isSummary)?.visible, false);
+});
 
 test("request estimates include reasoning and tools without charging image base64 as text", () => {
   const request = (data: string) => [

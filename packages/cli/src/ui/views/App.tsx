@@ -82,8 +82,11 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const writeRef = useRef(write);
   const lastRenderedColumnsRef = useRef<number | null>(null);
   const messagesRef = useRef<SessionMessage[]>([]);
+  const compactionControllerRef = useRef<AbortController | null>(null);
   const [view, setView] = useState<View>("chat");
   const [busy, setBusy] = useState(false);
+  const [compacting, setCompacting] = useState(false);
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -233,6 +236,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     sessionManager.setActiveSessionId(null);
     setStatusLine("");
     setErrorLine(null);
+    setCommandNotice(null);
     setRunningProcesses(null);
     setActiveStatus(null);
     setActiveAskPermissions(undefined);
@@ -276,6 +280,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
    */
   useEffect(() => {
     return () => {
+      compactionControllerRef.current?.abort();
+      compactionControllerRef.current = null;
       sessionManager.dispose();
     };
   }, [sessionManager]);
@@ -283,6 +289,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   writeRef.current = write;
   const handleExit = useCallback(
     ({ showCommand, showSummary }: { showCommand: boolean; showSummary: boolean }) => {
+      compactionControllerRef.current?.abort();
+      compactionControllerRef.current = null;
       setIsExiting(true);
       setTimeout(() => {
         const activeSessionId = sessionManager.getActiveSessionId();
@@ -319,6 +327,47 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     async (submission: PromptSubmission) => {
       if (submission.command === "exit") {
         handleExit({ showCommand: true, showSummary: true });
+        return;
+      }
+      if (compactionControllerRef.current) return;
+      setCommandNotice(null);
+      if (submission.command === "compact") {
+        if (busy) return;
+        setErrorLine(null);
+        const sessionId = sessionManager.getActiveSessionId();
+        if (!sessionId || !sessionManager.getSession(sessionId)) {
+          setCommandNotice("No active conversation to compact.");
+          return;
+        }
+        const controller = new AbortController();
+        compactionControllerRef.current = controller;
+        setBusy(true);
+        setCompacting(true);
+        setStreamProgress(null);
+        setRetryEvent(null);
+        try {
+          const changed = await sessionManager.compactSession(sessionId, controller.signal);
+          if (compactionControllerRef.current !== controller) return;
+          const session = sessionManager.getSession(sessionId);
+          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
+          refreshSessionsList();
+          if (!changed) setCommandNotice("Conversation was not compacted.");
+        } catch (error) {
+          if (compactionControllerRef.current !== controller) return;
+          if (controller.signal.aborted) {
+            setCommandNotice("Compaction cancelled.");
+          } else {
+            setErrorLine(error instanceof Error ? error.message : String(error));
+          }
+        } finally {
+          if (compactionControllerRef.current === controller) {
+            compactionControllerRef.current = null;
+            setCompacting(false);
+            setBusy(false);
+            setStreamProgress(null);
+            setRetryEvent(null);
+          }
+        }
         return;
       }
       if (submission.command === "new") {
@@ -454,6 +503,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       }
     },
     [
+      busy,
       sessionManager,
       pendingPermissionReply,
       handleExit,
@@ -469,6 +519,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   );
 
   const handleInterrupt = useCallback(() => {
+    if (compactionControllerRef.current) {
+      compactionControllerRef.current.abort();
+      return;
+    }
     sessionManager.interruptActiveSession();
   }, [sessionManager]);
 
@@ -580,6 +634,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
+      setCommandNotice(null);
       sessionManager.setActiveSessionId(sessionId);
       // Clear first so <Static> resets its index to 0.
       await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
@@ -843,17 +898,19 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const shouldShowQuestionPrompt = Boolean(pendingQuestion && !dismissedQuestionIds.has(pendingQuestion.messageId));
   const loadingText = useMemo(
     () =>
-      busy
-        ? buildLoadingText({
-            progress: streamProgress,
-            retry: retryEvent,
-            processes: runningProcesses,
-            screenWidth,
-            now: Date.now(),
-          })
-        : null,
+      compacting
+        ? "Compacting conversation..."
+        : busy
+          ? buildLoadingText({
+              progress: streamProgress,
+              retry: retryEvent,
+              processes: runningProcesses,
+              screenWidth,
+              now: Date.now(),
+            })
+          : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- nowTick forces periodic recalculation for spinner animation
-    [busy, streamProgress, retryEvent, runningProcesses, nowTick, screenWidth]
+    [compacting, busy, streamProgress, retryEvent, runningProcesses, nowTick, screenWidth]
   );
 
   const welcomeItem: SessionMessage = useMemo(
@@ -887,6 +944,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       busy ? "busy" : "idle",
       statusLine,
       errorLine ?? "",
+      commandNotice ?? "",
       showProcessStdout ? "stdout" : "main",
       activeStatus ?? "",
       staticItems.length,
@@ -900,6 +958,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     activeAskPermissions,
     activeStatus,
     busy,
+    commandNotice,
     errorLine,
     pendingPermissionReply,
     pendingQuestion,
@@ -994,6 +1053,11 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         }}
       </Static>
       {(busy || statusLine) && !isExiting ? <StatusLine busy={busy} text={statusLine} width={screenWidth} /> : null}
+      {commandNotice && !isExiting ? (
+        <Box>
+          <Text dimColor>{commandNotice}</Text>
+        </Box>
+      ) : null}
       {errorLine ? (
         <Box>
           <Text color="red">Error: {errorLine}</Text>

@@ -10,6 +10,7 @@ export type SlashCommandKind =
   | "resume"
   | "fork"
   | "continue"
+  | "compact"
   | "undo"
   | "mcp"
   | "raw"
@@ -72,6 +73,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "continue",
     label: "/continue",
     description: "Continue the active conversation or pick one to resume",
+  },
+  {
+    kind: "compact",
+    name: "compact",
+    label: "/compact",
+    description: "Compact the current conversation",
   },
   {
     kind: "undo",
