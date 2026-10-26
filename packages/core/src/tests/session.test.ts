@@ -999,9 +999,9 @@ test("compactSession does not mark skill catalog messages compacted", async () =
     id: "assistant-1",
     sessionId,
     role: "assistant",
-    content: "first reply",
+    content: "first reply".repeat(1000),
     contentParams: null,
-    messageParams: null,
+    messageParams: { tool_calls: [{ id: "call-1", type: "function", function: { name: "Read", arguments: "{}" } }] },
     compacted: false,
     visible: true,
     createTime: now,
@@ -3515,9 +3515,9 @@ test("SessionManager resets active tokens to latest post-compaction response usa
 
   const responses = [
     createChatResponse("large", {
-      prompt_tokens: 139_990,
+      prompt_tokens: 209_990,
       completion_tokens: 10,
-      total_tokens: 140_000,
+      total_tokens: 210_000,
     }),
     createChatResponse("summary", {
       prompt_tokens: 100,
@@ -3532,21 +3532,21 @@ test("SessionManager resets active tokens to latest post-compaction response usa
   ];
   const manager = createMockedClientSessionManager(workspace, responses);
 
-  const sessionId = await manager.createSession({ text: "" });
-  assert.equal(manager.getSession(sessionId)?.activeTokens, 140_000);
+  const sessionId = await manager.createSession({ text: "history ".repeat(1000) });
+  assert.equal(manager.getSession(sessionId)?.activeTokens, 210_000);
 
-  await manager.replySession(sessionId, { text: "" });
+  await manager.replySession(sessionId, { text: "new input ".repeat(16000) });
 
   const session = manager.getSession(sessionId);
   const usage = session?.usage as Record<string, any>;
   const usagePerModel = session?.usagePerModel?.["test-model"] as Record<string, any>;
   assert.equal(session?.activeTokens, 7);
-  assert.equal(usage.prompt_tokens, 140_095);
+  assert.equal(usage.prompt_tokens, 210_095);
   assert.equal(usage.completion_tokens, 35);
-  assert.equal(usage.total_tokens, 140_130);
-  assert.equal(usagePerModel.prompt_tokens, 140_095);
+  assert.equal(usage.total_tokens, 210_130);
+  assert.equal(usagePerModel.prompt_tokens, 210_095);
   assert.equal(usagePerModel.completion_tokens, 35);
-  assert.equal(usagePerModel.total_tokens, 140_130);
+  assert.equal(usagePerModel.total_tokens, 210_130);
   assert.equal(usagePerModel.total_reqs, 3);
 });
 
@@ -3556,14 +3556,14 @@ test("SessionManager uses the configured auto compact window", async () => {
   setHomeDir(home);
 
   const responses = [
-    createChatResponse("large", { prompt_tokens: 990, completion_tokens: 10, total_tokens: 1000 }),
+    createChatResponse("large", { prompt_tokens: 99_990, completion_tokens: 10, total_tokens: 100_000 }),
     createChatResponse("summary", { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 }),
     createChatResponse("after compact", { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }),
   ];
-  const manager = createMockedClientSessionManager(workspace, responses, 500);
+  const manager = createMockedClientSessionManager(workspace, responses, 90_000);
 
-  const sessionId = await manager.createSession({ text: "" });
-  await manager.replySession(sessionId, { text: "" });
+  const sessionId = await manager.createSession({ text: "history ".repeat(1000) });
+  await manager.replySession(sessionId, { text: "new input ".repeat(16000) });
 
   assert.equal(manager.getSession(sessionId)?.activeTokens, 7);
   assert.equal(manager.getSession(sessionId)?.usagePerModel?.["test-model"]?.total_reqs, 3);
@@ -4414,11 +4414,21 @@ test("Files API mode invalidates a rejected file ID and uploads it once more", a
   assert.deepEqual(retriedUserMessage.content, [{ type: "file", file_id: "file-image-2" }]);
 });
 
-test("Files API mode checks the aggregate request limit before uploading", async () => {
+test("Files API mode omits over-budget images before uploading and preserves the attachment", async () => {
   const workspace = createTempDir("deepcode-files-limit-workspace-");
   const home = createTempDir("deepcode-files-limit-home-");
   setHomeDir(home);
-  const client = { chat: { completions: { create: async () => assert.fail("chat request must not start") } } };
+  const requests: any[] = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: any) => {
+          requests.push(request);
+          return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        },
+      },
+    },
+  };
   const manager = new SessionManager({
     projectRoot: workspace,
     createOpenAIClient: () => ({
@@ -4444,8 +4454,14 @@ test("Files API mode checks the aggregate request limit before uploading", async
 
   const sessionId = await manager.createSession({ imageUrls: [await createOnePixelPngDataUrl()] });
 
-  assert.equal(manager.getSession(sessionId)?.status, "failed");
-  assert.match(manager.getSession(sessionId)?.failReason ?? "", /configured 4-byte/);
+  assert.equal(manager.getSession(sessionId)?.status, "completed");
+  assert.equal(requests.length, 1);
+  assert.match(JSON.stringify(requests[0].messages), /Image omitted:/);
+  const imageMessage = manager
+    .listSessionMessages(sessionId)
+    .find((message) => message.meta?.userPrompt?.imageUrls?.length);
+  assert.deepEqual(imageMessage?.meta?.omittedImages, ["prompt:0"]);
+  assert.ok(imageMessage?.meta?.userPrompt?.imageUrls?.length);
 });
 
 test("sessions reject unsupported pasted image data before creating a session", async () => {

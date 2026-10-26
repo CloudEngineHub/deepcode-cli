@@ -246,9 +246,9 @@ test("resolveSettings derives model-specific context window defaults", () => {
   );
 
   assert.equal(regular.contextWindow, 256 * 1024);
-  assert.equal(regular.autoCompactWindow, 128 * 1024);
+  assert.equal(regular.autoCompactWindow, Math.floor(256 * 1024 * 0.8));
   assert.equal(deepseekV4.contextWindow, 1024 * 1024);
-  assert.equal(deepseekV4.autoCompactWindow, 512 * 1024);
+  assert.equal(deepseekV4.autoCompactWindow, Math.floor(1024 * 1024 * 0.8));
 });
 
 test("resolveSettings parses numeric and K/M context window settings", () => {
@@ -273,7 +273,7 @@ test("resolveSettings derives auto compact window from the configured context wi
   );
 
   assert.equal(resolved.contextWindow, 512 * 1024);
-  assert.equal(resolved.autoCompactWindow, 256 * 1024);
+  assert.equal(resolved.autoCompactWindow, Math.floor(512 * 1024 * 0.8));
 });
 
 test("resolveSettings ignores invalid windows and caps auto compact window at context window", () => {
@@ -289,7 +289,7 @@ test("resolveSettings ignores invalid windows and caps auto compact window at co
   );
 
   assert.equal(invalid.contextWindow, 256 * 1024);
-  assert.equal(invalid.autoCompactWindow, 128 * 1024);
+  assert.equal(invalid.autoCompactWindow, Math.floor(256 * 1024 * 0.8));
   assert.equal(capped.contextWindow, 128 * 1024);
   assert.equal(capped.autoCompactWindow, 128 * 1024);
 });
@@ -318,7 +318,7 @@ test("resolveSettingsSources skips invalid higher-priority context window values
   );
 
   assert.equal(resolved.contextWindow, 512 * 1024);
-  assert.equal(resolved.autoCompactWindow, 256 * 1024);
+  assert.equal(resolved.autoCompactWindow, Math.floor(512 * 1024 * 0.8));
 });
 
 test("resolveSettings reads TEMPERATURE, THINKING_ENABLED, REASONING_EFFORT, and DEBUG_LOG_ENABLED from env", () => {
@@ -898,7 +898,7 @@ test("resolveSettings applies deepseek-flash capabilities and respects explicit 
   assert.equal(resolved.model, "deepseek-flash");
   assert.equal(resolved.thinkingEnabled, true);
   assert.equal(resolved.contextWindow, 1024 * 1024);
-  assert.equal(resolved.autoCompactWindow, 512 * 1024);
+  assert.equal(resolved.autoCompactWindow, Math.floor(1024 * 1024 * 0.8));
 
   const overridden = resolveSettings(
     { model: "deepseek-flash", thinkingEnabled: false, contextWindow: "512K", autoCompactWindow: "128K" },

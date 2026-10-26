@@ -28,7 +28,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
 | `env`                      | object        | Group of environment variables (see sub-field table below)                                                     |
 | `contextWindow`            | number/string | Context-window limit as an exact token count or `128K`/`1M` value                                              |
-| `autoCompactWindow`        | number/string | Auto-compaction threshold; defaults to 50% of the final context window                                         |
+| `autoCompactWindow`        | number/string | Auto-compaction threshold; defaults to 80% of the context window and may trigger earlier to reserve room for replies                                         |
 | `model`                    | string        | Model name. Defaults to `deepseek-v4-flash` and takes precedence over `env.MODEL`                              |
 | `thinkingEnabled`          | boolean       | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)                                    |
 | `reasoningEffort`          | string        | Reasoning intensity: `"low"`, `"high"`, or `"max"` (default `"max"`)                                           |
