@@ -47,7 +47,15 @@ const TERMINAL_FOCUS_OUT = "\u001B[O";
 //   ESC[200~  ...pasted content...  ESC[201~
 const PASTE_START = "\u001B[200~";
 const PASTE_END = "\u001B[201~";
-const PASTE_END_LENGTH = 6; // length of PASTE_END
+const ESCAPE_SEQUENCE_TIMEOUT_MS = 20;
+
+/** Length of a trailing, incomplete marker that must wait for the next data event. */
+function partialMarkerLength(input: string, marker: string): number {
+  for (let length = Math.min(input.length, marker.length - 1); length > 0; length--) {
+    if (input.endsWith(marker.slice(0, length))) return length;
+  }
+  return 0;
+}
 
 // Ctrl+- (minus) sequences in modifyOtherKeys mode.
 // \u001B[45;5u  — standard format: keycode=45 ('-'), modifier=5 (Ctrl)
@@ -255,15 +263,8 @@ export function useTerminalInput(
   const handlerRef = useRef(inputHandler);
   handlerRef.current = inputHandler;
 
-  // Mutable paste-bracketing state shared across data events.
-  // Uses an array of chunks instead of string concatenation to avoid
-  // O(n²) copying when the terminal splits a large paste across many events.
-  const pasteRef = useRef({ active: false, chunks: [] as string[] });
-
   useLayoutEffect(() => {
     if (!isActive) {
-      pasteRef.current.active = false;
-      pasteRef.current.chunks = [];
       return;
     }
     setRawMode(true);
@@ -277,80 +278,65 @@ export function useTerminalInput(
       return;
     }
 
+    let pasteActive = false;
+    const pasteChunks: string[] = [];
+    let pending = "";
+    let escapeTimer: ReturnType<typeof setTimeout> | undefined;
+
     const handleData = (data: Buffer | string) => {
-      const raw = String(data);
+      clearTimeout(escapeTimer);
+      escapeTimer = undefined;
+      let raw = pending + String(data);
+      pending = "";
 
-      // ----- Bracketed paste handling -----
-      // Most terminals send the start/end markers in the same chunk as
-      // the content. We handle both inline and multi-chunk scenarios.
+      while (raw.length > 0) {
+        const marker = pasteActive ? PASTE_END : PASTE_START;
+        const markerIndex = raw.indexOf(marker);
 
-      if (raw.includes(PASTE_START)) {
-        pasteRef.current.active = true;
-        pasteRef.current.chunks = [];
-
-        // Extract content after the start marker.
-        const startIdx = raw.indexOf(PASTE_START);
-        const afterStart = raw.slice(startIdx + PASTE_START.length);
-
-        // Check if the end marker is also in this same chunk.
-        const endIdx = afterStart.indexOf(PASTE_END);
-        if (endIdx !== -1) {
-          // Both markers in one chunk — process immediately.
-          const pasteContent = afterStart.slice(0, endIdx);
-          pasteRef.current.active = false;
-          const remaining = afterStart.slice(endIdx + PASTE_END_LENGTH);
-
-          if (pasteContent.length > 0) {
-            handlerRef.current(pasteContent, { ...EMPTY_KEY, paste: true });
+        if (markerIndex === -1) {
+          // Only carry a possible marker prefix (at most five characters).
+          // Keep the body in chunks and join once, when the paste finishes.
+          const pendingLength = partialMarkerLength(raw, marker);
+          const content = raw.slice(0, raw.length - pendingLength);
+          pending = raw.slice(raw.length - pendingLength);
+          if (content) {
+            if (pasteActive) pasteChunks.push(content);
+            else dispatchTerminalInput(content, handlerRef.current);
           }
-          if (remaining.length > 0) {
-            dispatchTerminalInput(remaining, handlerRef.current);
-          }
-          return;
-        }
 
-        // Only start marker — buffer as first chunk.
-        if (afterStart) {
-          pasteRef.current.chunks.push(afterStart);
-        }
-        return;
-      }
-
-      if (pasteRef.current.active) {
-        pasteRef.current.chunks.push(raw);
-        // Only join+search when this chunk might contain the end marker.
-        if (raw.includes("201~")) {
-          const combined = pasteRef.current.chunks.join("");
-          const endIdx = combined.indexOf(PASTE_END);
-          if (endIdx !== -1) {
-            const pasteContent = combined.slice(0, endIdx);
-            pasteRef.current.active = false;
-            const remaining = combined.slice(endIdx + PASTE_END_LENGTH);
-            pasteRef.current.chunks = [];
-
-            // Dispatch the pasted text as a single event.
-            if (pasteContent.length > 0) {
-              handlerRef.current(pasteContent, { ...EMPTY_KEY, paste: true });
-            }
-
-            // Handle any remaining input after the paste end marker.
-            if (remaining.length > 0) {
-              dispatchTerminalInput(remaining, handlerRef.current);
-            }
-            return;
+          // Esc and Alt+[ are also prefixes of the paste start marker. Give
+          // the next data event a short window before treating them as keys.
+          // Never time out an in-progress paste or an unambiguous CSI prefix.
+          if (!pasteActive && (pending === "\u001B" || pending === "\u001B[")) {
+            escapeTimer = setTimeout(() => {
+              escapeTimer = undefined;
+              const input = pending;
+              pending = "";
+              dispatchTerminalInput(input, handlerRef.current);
+            }, ESCAPE_SEQUENCE_TIMEOUT_MS);
           }
           return;
         }
-        return;
-      }
 
-      // ----- Normal (non-paste) input -----
-      dispatchTerminalInput(data, handlerRef.current);
+        const content = raw.slice(0, markerIndex);
+        raw = raw.slice(markerIndex + marker.length);
+        if (pasteActive) {
+          pasteChunks.push(content);
+          const pasteContent = pasteChunks.join("");
+          pasteChunks.length = 0;
+          pasteActive = false;
+          if (pasteContent) handlerRef.current(pasteContent, { ...EMPTY_KEY, paste: true });
+        } else {
+          if (content) dispatchTerminalInput(content, handlerRef.current);
+          pasteActive = true;
+        }
+      }
     };
 
     stdin?.on("data", handleData);
     return () => {
       stdin?.off("data", handleData);
+      clearTimeout(escapeTimer);
     };
   }, [isActive, stdin]);
 }
