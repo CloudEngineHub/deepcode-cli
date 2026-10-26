@@ -109,7 +109,7 @@ These states are persisted in `sessions-index.json`, so they remain visible in t
 
 ## How `/undo` Uses Persistent Data
 
-`/undo` candidates come from visible, non-compacted user messages. Each candidate is checked for an associated `checkpointHash`, and Deep Code verifies whether the checkpoint can be restored.
+`/undo` candidates come from visible user messages whose original records are still stored. Each candidate is checked for an associated `checkpointHash`, and Deep Code verifies whether the checkpoint can be restored.
 
 Depending on the selected mode, Deep Code can perform these operations:
 

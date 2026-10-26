@@ -2289,6 +2289,52 @@ test("restoreSessionConversation truncates messages before the selected user pro
   assert.equal(manager.getSession(sessionId)?.assistantReply, "first answer");
 });
 
+test("undo restores code and conversation from a compacted prompt checkpoint", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+  const workspace = createTempDir("deepcode-undo-compacted-code-workspace-");
+  const home = createTempDir("deepcode-undo-compacted-code-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-undo-compacted-code");
+  (manager as any).activateSession = async () => {};
+  const sessionId = await manager.createSession({ text: "original prompt" });
+  const checkpointHash = createFileHistoryCommit(home, workspace, sessionId, { "tracked.txt": "before\n" });
+  createFileHistoryCommit(home, workspace, sessionId, { "tracked.txt": "after\n" });
+  fs.writeFileSync(path.join(workspace, "tracked.txt"), "after\n", "utf8");
+  const answer = buildTestMessage("original-answer", sessionId, "assistant", "original answer");
+  const target = {
+    ...buildTestMessage("compacted-target", sessionId, "user", "restore here"),
+    compacted: true,
+    checkpointHash,
+  };
+  const originals = [...manager.listSessionMessages(sessionId), answer];
+  (manager as any).saveSessionMessages(sessionId, [
+    {
+      ...buildTestMessage("summary", sessionId, "user", "Includes later information"),
+      visible: false,
+      meta: { isSummary: true },
+    },
+    ...originals.map((message) => ({ ...message, compacted: true })),
+    target,
+    buildTestMessage("later-answer", sessionId, "assistant", "later answer"),
+  ]);
+
+  const undoTarget = manager.listUndoTargets(sessionId).find((item) => item.message.id === target.id);
+  assert.ok(undoTarget?.canRestoreCode);
+  manager.restoreSessionCode(sessionId, target.id);
+  manager.restoreSessionConversation(sessionId, target.id);
+
+  assert.equal(fs.readFileSync(path.join(workspace, "tracked.txt"), "utf8"), "before\n");
+  assert.deepEqual(
+    manager.listSessionMessages(sessionId).map((message) => message.id),
+    originals.map((message) => message.id)
+  );
+  assert.ok(manager.listSessionMessages(sessionId).every((message) => !message.compacted));
+  assert.equal(manager.getSession(sessionId)?.assistantReply, "original answer");
+});
+
 test("restoreSessionCode restores project files from the recorded Git checkpoint", async (t) => {
   if (!hasGit()) {
     t.skip("git is not available");

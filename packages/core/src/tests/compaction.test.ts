@@ -290,6 +290,139 @@ test("native replay preserves multimodal observations and consolidates legacy sy
   assert.match(JSON.stringify(f.requests[1].messages), /compacted-summary/);
 });
 
+test("undo lists original user prompts after compaction without exposing hidden messages or summaries", async () => {
+  const f = fixture([
+    message("system", "system", "System instruction"),
+    message("first"),
+    { ...message("hidden"), visible: false },
+    message("reply", "assistant"),
+    message("latest", "user", "continue"),
+  ]);
+  await f.compact();
+  const saved = f.read();
+  assert.equal(saved.find((m) => m.id === "first")?.compacted, true);
+  // Even a visible summary must not become an undo target.
+  f.internal.appendSessionMessage("compact-test", {
+    ...message("visible-summary"),
+    meta: { isSummary: true },
+  });
+  const targets = f.manager.listUndoTargets("compact-test");
+  assert.deepEqual(
+    targets.map((target) => target.message.id),
+    ["first", "latest"]
+  );
+  assert.deepEqual(
+    targets.map((target) => target.index),
+    [saved.findIndex((m) => m.id === "first"), saved.findIndex((m) => m.id === "latest")]
+  );
+  assert.ok(targets.every((target) => !target.canRestoreCode));
+});
+
+for (const targetId of ["first", "second", "third"]) {
+  test(`undo to ${targetId} after repeated compaction restores only preceding original messages`, async () => {
+    const originals = [
+      message("system", "system", "System instruction"),
+      message("first", "user", "FIRST_PROMPT " + "history ".repeat(1000)),
+      message("first-answer", "assistant", "FIRST_ANSWER " + "history ".repeat(1000)),
+      message("second", "user", "SECOND_PROMPT " + "history ".repeat(1000)),
+      message("second-answer", "assistant", "SECOND_ANSWER " + "history ".repeat(1000)),
+      message("third", "user", "THIRD_PROMPT " + "history ".repeat(1000)),
+    ];
+    const f = fixture(originals, () => answer("SUMMARY_INCLUDING_LATER_CONTENT"));
+    await f.compact();
+    f.internal.appendSessionMessage("compact-test", message("third-answer", "assistant"));
+    f.internal.appendSessionMessage("compact-test", message("fourth", "user", "FOURTH_PROMPT"));
+    await f.compact();
+    assert.equal(f.read().filter((m) => m.meta?.isSummary).length, 2);
+    assert.equal(f.read().find((m) => m.id === targetId)?.compacted, true);
+    await f.run();
+    assert.equal(f.internal.requestUsageAnchors.has("compact-test"), true);
+
+    const restored = f.manager.restoreSessionConversation("compact-test", targetId);
+    const expected = originals.slice(
+      0,
+      originals.findIndex((m) => m.id === targetId)
+    );
+    assert.deepEqual(
+      restored.map((m) => m.id),
+      expected.map((m) => m.id)
+    );
+    assert.ok(restored.every((m) => !m.compacted && !m.meta?.isSummary));
+    assert.deepEqual(f.read(), restored);
+    assert.equal(f.internal.requestUsageAnchors.has("compact-test"), false);
+
+    await f.run();
+    const request = JSON.stringify(f.requests.at(-1).messages);
+    for (const original of originals) {
+      assert.equal(request.includes(original.content!), expected.includes(original));
+    }
+    assert.doesNotMatch(request, /SUMMARY_INCLUDING_LATER_CONTENT|FOURTH_PROMPT/);
+
+    if (targetId === "third") {
+      await f.compact();
+      assert.equal(f.read().filter((m) => m.meta?.isSummary && !m.compacted).length, 1);
+      const summaryInput = JSON.stringify(f.requests.at(-1).messages);
+      assert.match(summaryInput, /FIRST_PROMPT/);
+      assert.doesNotMatch(summaryInput, /THIRD_PROMPT|FOURTH_PROMPT|SUMMARY_INCLUDING_LATER_CONTENT/);
+      await f.run();
+    }
+  });
+}
+
+test("undo to an uncompacted prompt preserves valid summaries and clears the usage anchor", async () => {
+  const f = fixture([message("first"), message("reply", "assistant"), message("latest", "user", "continue")]);
+  await f.compact();
+  await f.run();
+  const before = f.read();
+  assert.ok(before.some((m) => m.meta?.isSummary && !m.compacted));
+  const restored = f.manager.restoreSessionConversation("compact-test", "latest");
+  assert.deepEqual(
+    restored,
+    before.slice(
+      0,
+      before.findIndex((m) => m.id === "latest")
+    )
+  );
+  assert.equal(f.internal.requestUsageAnchors.has("compact-test"), false);
+  await f.run();
+  assert.match(JSON.stringify(f.requests.at(-1).messages), /compacted-summary/);
+  assert.doesNotMatch(JSON.stringify(f.requests.at(-1).messages), /history history/);
+});
+
+test("undo reloads legacy and current summaries from disk and restores original history", async () => {
+  const first = { ...message("first", "user", "Original first prompt"), compacted: true };
+  const target = { ...message("target", "user", "Discard this prompt"), compacted: true };
+  const f = fixture([
+    message("system", "system", "System instruction"),
+    { ...message("current-summary", "user", "Future information"), visible: false, meta: { isSummary: true } },
+    first,
+    { ...message("legacy-summary", "system", "Legacy information"), compacted: true, meta: { isSummary: true } },
+    target,
+    message("latest", "user", "Later input"),
+  ]);
+  const reloaded = new SessionManager({
+    projectRoot: f.root,
+    createOpenAIClient: () => ({ client: null, model: f.settings.model, thinkingEnabled: true }),
+    getResolvedSettings: () => f.settings,
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+  assert.deepEqual(
+    reloaded.listUndoTargets("compact-test").map((item) => item.message.id),
+    ["first", "target", "latest"]
+  );
+  const restored = reloaded.restoreSessionConversation("compact-test", "target");
+  assert.deepEqual(
+    restored.map((m) => m.id),
+    ["system", "first"]
+  );
+  assert.ok(restored.every((m) => !m.compacted));
+  await f.run();
+  const request = JSON.stringify(f.requests.at(-1).messages);
+  assert.match(request, /Original first prompt/);
+  assert.doesNotMatch(request, /Future information|Legacy information|Discard this prompt|Later input/);
+});
+
 test("invalid summaries and cancellation leave original history intact", async () => {
   const responses = [
     answer(""),

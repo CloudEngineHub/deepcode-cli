@@ -2655,9 +2655,16 @@ ${agentInstructions}
       throw new Error("Selected message was not found in this session.");
     }
 
-    const keptMessages = messages.slice(0, targetIndex);
-    this.saveSessionMessages(sessionId, keptMessages);
     const now = new Date().toISOString();
+    const precedingMessages = messages.slice(0, targetIndex);
+    // Summaries may precede their source messages and contain content after the undo target.
+    const keptMessages = messages[targetIndex].compacted
+      ? precedingMessages
+          .filter((message) => !message.meta?.isSummary)
+          .map((message) => (message.compacted ? { ...message, compacted: false, updateTime: now } : message))
+      : precedingMessages;
+    this.saveSessionMessages(sessionId, keptMessages);
+    this.requestUsageAnchors.delete(sessionId);
     const latestAssistant = [...keptMessages].reverse().find((message) => message.role === "assistant");
     const latestAssistantParams = latestAssistant?.messageParams as
       | { tool_calls?: unknown[]; reasoning_content?: string }
@@ -2793,7 +2800,7 @@ ${agentInstructions}
   }
 
   private isUndoTargetMessage(message: SessionMessage): boolean {
-    return message.role === "user" && message.visible && !message.compacted;
+    return message.role === "user" && message.visible && !message.meta?.isSummary;
   }
 
   private ensureProjectDir(): string {
