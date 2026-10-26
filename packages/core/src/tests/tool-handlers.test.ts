@@ -1306,7 +1306,8 @@ for (const legacy of [false, true]) {
       assert.equal(getSnippet(sessionId, snippet.id)?.scopeType, "full");
       const edit = await handleEditTool({ snippet_id: snippet.id, old_string: "beta", new_string: "gamma" }, context);
       assert.equal(edit.ok, true, edit.error);
-      assert.equal(fs.readFileSync(filePath, "utf8"), `alpha${os.EOL}gamma${os.EOL}`);
+      // The first write has no newline, so subsequent writes preserve its detected LF ending.
+      assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\ngamma\n");
     }
 
     const nextWrite = await handleWriteTool({ file_path: filePath, content: "next" }, context);
