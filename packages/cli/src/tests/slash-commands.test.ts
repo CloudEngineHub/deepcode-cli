@@ -6,6 +6,7 @@ import {
   findExactSlashCommand,
   formatSlashCommandDescription,
   formatSlashCommandLabel,
+  resolveSlashSubmission,
 } from "../ui";
 import type { SkillInfo } from "@vegamo/deepcode-core";
 
@@ -173,6 +174,61 @@ test("findExactSlashCommand returns the matching skill", () => {
   assert.ok(item);
   assert.equal(item?.kind, "skill");
   assert.equal(item?.skill?.name, "code-review");
+});
+
+test("resolveSlashSubmission treats a bare command as a command", () => {
+  const items = buildSlashCommands(skills);
+  assert.deepEqual(resolveSlashSubmission(items, "/plan"), {
+    kind: "command",
+    item: items.find((item) => item.kind === "plan"),
+  });
+});
+
+test("resolveSlashSubmission sends /plan arguments as a one-shot prompt", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/plan   重构权限模块，先梳理现状  ");
+  assert.equal(result?.kind, "plan");
+  assert.equal(result?.kind === "plan" ? result.text : "", "重构权限模块，先梳理现状");
+});
+
+test("resolveSlashSubmission keeps newlines inside a /plan prompt", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/plan\nline one\n  line two");
+  assert.equal(result?.kind, "plan");
+  assert.equal(result?.kind === "plan" ? result.text : "", "line one\n  line two");
+});
+
+test("resolveSlashSubmission applies a valid /raw argument", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/raw lite");
+  assert.equal(result?.kind, "raw");
+  assert.equal(result?.kind === "raw" ? result.mode : "", "lite");
+});
+
+test("resolveSlashSubmission rejects an unknown /raw argument", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/raw verbose");
+  assert.equal(result?.kind, "argument-error");
+  assert.equal(result?.kind === "argument-error" ? result.argument : "", "verbose");
+});
+
+test("resolveSlashSubmission keeps existing behavior for other commands", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/new keep this text");
+  assert.equal(result?.kind, "command");
+  assert.equal(result?.kind === "command" ? result.item.kind : "", "new");
+});
+
+test("resolveSlashSubmission does not block /compact arguments", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/compact extra text");
+  assert.equal(result?.kind, "command");
+  assert.equal(result?.kind === "command" ? result.item.kind : "", "compact");
+});
+
+test("resolveSlashSubmission leaves unknown slash text as a normal prompt", () => {
+  const items = buildSlashCommands(skills);
+  assert.equal(resolveSlashSubmission(items, "/planning is not a command"), null);
 });
 
 test("formatSlashCommandDescription keeps descriptions on one line", () => {

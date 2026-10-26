@@ -148,6 +148,48 @@ export function findExactSlashCommand(items: SlashCommandItem[], token: string):
   return matches.find((item) => item.kind !== "skill") ?? matches[0] ?? null;
 }
 
+export type SlashSubmission =
+  | { kind: "command"; item: SlashCommandItem }
+  | { kind: "plan"; item: SlashCommandItem; text: string }
+  | { kind: "raw"; item: SlashCommandItem; mode: string }
+  | { kind: "argument-error"; item: SlashCommandItem; argument: string };
+
+/**
+ * Classify a submitted slash input without touching UI state. A command alone
+ * runs as before; `/plan <text>` is a one-shot plan-mode prompt; `/raw <mode>`
+ * selects that mode and reports an unknown mode. Other commands keep their
+ * existing behavior and ignore trailing text.
+ */
+export function resolveSlashSubmission(items: SlashCommandItem[], text: string): SlashSubmission | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) {
+    return null;
+  }
+  const match = /^(\S+)([\s\S]*)$/.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+  const item = findExactSlashCommand(items, match[1]);
+  if (!item) {
+    return null;
+  }
+  const rest = match[2].trim();
+  if (!rest) {
+    return { kind: "command", item };
+  }
+  if (item.kind === "plan") {
+    return { kind: "plan", item, text: rest };
+  }
+  if (item.kind === "raw") {
+    if (item.args?.includes(rest)) {
+      return { kind: "raw", item, mode: rest };
+    }
+    return { kind: "argument-error", item, argument: rest };
+  }
+  // Other commands keep their existing behavior and ignore trailing text.
+  return { kind: "command", item };
+}
+
 export function formatSlashCommandDescription(description: string): string {
   return (description || "(no description)").trim().replace(/\s+/g, " ");
 }
