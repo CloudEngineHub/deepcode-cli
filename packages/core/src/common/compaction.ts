@@ -8,12 +8,33 @@ export type CompactBudget = {
   retain: number;
 };
 
-export function compactBudget(window: number, configuredThreshold = Math.floor(window * 0.8)): CompactBudget {
+export type CompactRetention = { retainRatio?: number; retainTokens?: number };
+
+export function validateCompactRetention({ retainRatio, retainTokens }: CompactRetention): void {
+  if (retainRatio !== undefined && retainTokens !== undefined)
+    throw new Error("retainRatio and retainTokens are mutually exclusive.");
+  if (retainRatio !== undefined && (!Number.isFinite(retainRatio) || retainRatio <= 0 || retainRatio > 1))
+    throw new Error("retainRatio must be a number in (0, 1].");
+  if (retainTokens !== undefined && (!Number.isInteger(retainTokens) || retainTokens < 0))
+    throw new Error("retainTokens must be a non-negative integer.");
+}
+
+export function compactBudget(
+  window: number,
+  configuredThreshold = Math.floor(window * 0.8),
+  retention: CompactRetention = {}
+): CompactBudget {
+  validateCompactRetention(retention);
   const output = Math.max(1, Math.min(65536, Math.floor(window / 8)));
   const input = window - output;
   const threshold = Math.min(configuredThreshold, input - output);
   if (threshold <= 0) throw new Error("The context window leaves no room for conversation input.");
-  return { output, input, threshold, retain: Math.min(Math.floor(input * 0.16), Math.floor(threshold * 0.8)) };
+  const retain = retention.retainTokens ?? Math.floor(input * (retention.retainRatio ?? 0.16));
+  if (retain >= threshold)
+    throw new Error(
+      `The retention budget (${retain}) must be less than the compaction threshold (${threshold}). Adjust retainRatio or retainTokens.`
+    );
+  return { output, input, threshold, retain };
 }
 
 /** An estimate, not a tokenizer. Never charge binary image encodings as text. */

@@ -387,6 +387,8 @@ export type SessionManagerOptions = {
     maxRequestFilesBytes?: number;
     contextWindow?: number;
     autoCompactWindow?: number;
+    retainRatio?: number;
+    retainTokens?: number;
     webSearchTool?: string;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
@@ -436,6 +438,8 @@ export class SessionManager {
     maxRequestFilesBytes?: number;
     contextWindow?: number;
     autoCompactWindow?: number;
+    retainRatio?: number;
+    retainTokens?: number;
     webSearchTool?: string;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
@@ -1914,7 +1918,11 @@ ${agentInstructions}
 
   private getCompactionBudget(model: string) {
     const settings = this.getResolvedSettings();
-    return compactBudget(settings.contextWindow ?? getDefaultContextWindow(model), settings.autoCompactWindow);
+    return compactBudget(
+      settings.contextWindow ?? getDefaultContextWindow(model),
+      settings.autoCompactWindow,
+      settings
+    );
   }
 
   /** Derive exactly the content used by both normal and summary requests, before uploads. */
@@ -1956,7 +1964,7 @@ ${agentInstructions}
       anchor?.route === route &&
       anchor.hashes.length <= hashes.length &&
       anchor.hashes.every((hash, index) => hash === hashes[index]);
-    const tokens = anchored ? Math.max(estimate, anchor.tokens + estimate - anchor.estimate) : estimate;
+    const tokens = anchored ? anchor.tokens + estimate - anchor.estimate : estimate;
     return { route, hashes, estimate, tokens };
   }
 
@@ -2048,10 +2056,10 @@ ${agentInstructions}
         const promptTokens = response.usage?.prompt_tokens;
         this.requestUsageAnchors.set(sessionId, {
           ...measurement,
-          tokens: Math.max(
-            measurement.estimate,
-            typeof promptTokens === "number" ? promptTokens : measurement.estimate
-          ),
+          tokens:
+            typeof promptTokens === "number" && Number.isFinite(promptTokens) && promptTokens >= 0
+              ? promptTokens
+              : measurement.estimate,
         });
         return response;
       } catch (error) {

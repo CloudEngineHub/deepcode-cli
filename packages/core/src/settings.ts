@@ -2,6 +2,7 @@ import { DEEPSEEK_V4_MODELS, defaultsToThinkingMode, type MultimodalMode } from 
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { compactBudget, validateCompactRetention } from "./common/compaction";
 
 export type DeepcodingEnv = Record<string, string | undefined> & {
   MODEL?: string;
@@ -88,6 +89,8 @@ export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   contextWindow?: number | string;
   autoCompactWindow?: number | string;
+  retainRatio?: number;
+  retainTokens?: number;
   model?: string;
   temperature?: number;
   thinkingEnabled?: boolean;
@@ -116,6 +119,8 @@ export type ResolvedDeepcodingSettings = {
   model: string;
   contextWindow: number;
   autoCompactWindow: number;
+  retainRatio?: number;
+  retainTokens?: number;
   temperature?: number;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
@@ -607,6 +612,15 @@ export function resolveSettingsSources(
   );
   const defaultAutoCompactWindow = Math.max(1, Math.floor(contextWindow * 0.8));
   const autoCompactWindow = Math.min(configuredAutoCompactWindow ?? defaultAutoCompactWindow, contextWindow);
+  validateCompactRetention(userSettings ?? {});
+  validateCompactRetention(projectSettings ?? {});
+  const retention =
+    projectSettings?.retainRatio !== undefined || projectSettings?.retainTokens !== undefined
+      ? projectSettings
+      : userSettings;
+  const retainTokens = retention?.retainTokens;
+  const retainRatio = retainTokens === undefined ? (retention?.retainRatio ?? 0.16) : undefined;
+  compactBudget(contextWindow, autoCompactWindow, { retainRatio, retainTokens });
 
   const thinkingEnabled =
     parseBoolean(systemEnv.THINKING_ENABLED) ??
@@ -705,6 +719,8 @@ export function resolveSettingsSources(
     model,
     contextWindow,
     autoCompactWindow,
+    retainRatio,
+    retainTokens,
     temperature,
     thinkingEnabled,
     reasoningEffort,

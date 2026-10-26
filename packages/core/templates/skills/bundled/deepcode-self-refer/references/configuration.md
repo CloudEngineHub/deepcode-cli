@@ -28,7 +28,9 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | -------------------------- | ------------- | ------------------------------------------------------------------------------------- |
 | `env`                      | object        | 环境变量分组（见下方子字段表）                                                        |
 | `contextWindow`            | number/string | 上下文窗口上限，可使用精确 token 数或 `128K`、`1M` 等格式                             |
-| `autoCompactWindow`        | number/string | 自动压缩阈值，默认取上下文窗口的 80%；预留回复空间时可能提前触发                                              |
+| `autoCompactWindow`        | number/string | 自动压缩阈值，默认取上下文窗口的 80%；预留回复空间时可能提前触发                      |
+| `retainRatio`              | number        | 尾部保留预算占「上下文窗口减去输出预留」的比例，默认 `0.16`                           |
+| `retainTokens`             | number        | 尾部保留的绝对 token 预算，与 `retainRatio` 互斥                                      |
 | `model`                    | string        | 模型名称。默认 `deepseek-v4-flash`，优先级高于 `env.MODEL`                            |
 | `thinkingEnabled`          | boolean       | 是否启用思考模式（DeepSeek V4 系列默认启用）                                          |
 | `reasoningEffort`          | string        | 推理强度，可选 `"low"`、`"high"` 或 `"max"`（默认 `"max"`）                           |
@@ -72,9 +74,26 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 }
 ```
 
-普通模型的默认上下文窗口为 `256K`，DeepSeek V4 系列为 `1M`。未设置自动压缩阈值时取最终上下文窗口的 50%；无效值会被忽略，自动压缩阈值超过上下文窗口时会限制为上下文窗口。
+普通模型的默认上下文窗口为 `256K`，DeepSeek V4 系列为 `1M`。未设置自动压缩阈值时取最终上下文窗口的 80%；无效值会被忽略，自动压缩阈值超过上下文窗口时会限制为上下文窗口。
 
-通过 `/model` 或 `model` 配置可选择 `deepseek-flash`（DeepSeek-V4.1-Flash）。它支持原生图片输入和 `low/high/max` 思考强度，默认上下文窗口为 1M（1,048,576 tokens），自动压缩阈值为 512K；显式配置优先。默认模型仍为 `deepseek-v4-flash`。
+通过 `/model` 或 `model` 配置可选择 `deepseek-flash`（DeepSeek-V4.1-Flash）。它支持原生图片输入和 `low/high/max` 思考强度，默认上下文窗口为 1M（1,048,576 tokens），自动压缩阈值默认为上下文窗口的 80%；显式配置优先。默认模型仍为 `deepseek-v4-flash`。
+
+#### 压缩后的尾部保留预算
+
+`retainRatio` 和 `retainTokens` 是 `settings.json` 的顶层字段，同一配置文件只能设置其中一项。项目级设置任一项时，整体覆盖用户级的保留策略；项目未设置时继承用户配置，两处均未设置时默认采用 `retainRatio: 0.16`。
+
+`retainRatio` 必须是 `(0, 1]` 范围内的数字，预算按「上下文窗口减去输出预留」乘以该比例并向下取整。`retainTokens` 必须是非负整数，`0` 表示不额外预留尾部；不支持 `"32K"` 等字符串。
+
+最终保留预算必须严格小于实际生效的自动压缩阈值，否则报配置错误，不会自动缩小预算。使用较低阈值时，可能需要同时设置较小的保留预算：
+
+```json
+{
+  "autoCompactWindow": "180K",
+  "retainTokens": 32768
+}
+```
+
+这两项配置用于自动压缩。工具调用与结果会保持完整，因此实际保留量可能超过预算。手动压缩和上下文超限恢复继续采用不额外预留尾部的策略。
 
 #### `thinkingEnabled` — 思考模式
 

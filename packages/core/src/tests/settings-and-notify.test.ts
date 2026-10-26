@@ -256,6 +256,7 @@ test("resolveSettings parses numeric and K/M context window settings", () => {
     {
       contextWindow: " 2m ",
       autoCompactWindow: 300_000,
+      retainTokens: 32000,
     },
     { model: "default-model", baseURL: "https://default.example.com" },
     TEST_PROCESS_ENV
@@ -935,4 +936,37 @@ test("PLUS settings normalize subscriptionPlan and keep it separate from env", (
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test("retention settings default and override as a pair across configuration sources", () => {
+  const resolve = (user: any, project: any = {}) =>
+    resolveSettingsSources(user, project, { model: "test", baseURL: "https://example.com" }, {});
+  assert.equal(resolve({}).retainRatio, 0.16);
+  assert.equal(resolve({}).retainTokens, undefined);
+  const absolute = resolve({ retainRatio: 0.2 }, { retainTokens: 0 });
+  assert.equal(absolute.retainTokens, 0);
+  assert.equal(absolute.retainRatio, undefined);
+  const ratio = resolve({ retainTokens: 1000 }, { retainRatio: 0.1 });
+  assert.equal(ratio.retainRatio, 0.1);
+  assert.equal(ratio.retainTokens, undefined);
+  assert.equal(resolve({ retainTokens: 1000 }).retainTokens, 1000);
+  assert.equal(resolve({ retainRatio: 0.2 }).retainRatio, 0.2);
+});
+
+test("retention settings reject conflicting, invalid and oversized budgets", () => {
+  const resolve = (user: any, project: any = {}) =>
+    resolveSettingsSources(user, project, { model: "test", baseURL: "https://example.com" }, {});
+  const conflict = { retainRatio: 0.16, retainTokens: 1000 };
+  assert.throws(() => resolve(conflict, { retainTokens: 2000 }), /mutually exclusive/);
+  assert.throws(() => resolve({}, conflict), /mutually exclusive/);
+  for (const retainRatio of [0, -1, 1.1, Infinity, NaN, "0.16", null])
+    assert.throws(() => resolve({ retainRatio }), /retainRatio/);
+  for (const retainTokens of [-1, 1.5, Infinity, NaN, "32K", null])
+    assert.throws(() => resolve({}, { retainTokens }), /retainTokens/);
+  assert.throws(() => resolve({ contextWindow: 100000, autoCompactWindow: 10000 }), /must be less/);
+  assert.throws(
+    () => resolve({ contextWindow: 100000, autoCompactWindow: 50000, retainTokens: 50000 }),
+    /must be less/
+  );
+  assert.throws(() => resolve({ retainRatio: 1 }), /must be less/);
 });

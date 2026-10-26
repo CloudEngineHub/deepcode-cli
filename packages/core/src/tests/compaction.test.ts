@@ -55,7 +55,12 @@ function fixture(history: SessionMessage[], respond: (request: any, call: number
   process.env.HOME = root;
   process.env.USERPROFILE = root;
   const requests: any[] = [];
-  const settings = { model: "test-vision", contextWindow: 256 * 1024, autoCompactWindow: 190000 };
+  const settings = {
+    model: "test-vision",
+    contextWindow: 256 * 1024,
+    autoCompactWindow: 190000,
+    retainTokens: undefined as number | undefined,
+  };
   const manager = new SessionManager({
     projectRoot: root,
     createOpenAIClient: () => ({
@@ -538,4 +543,67 @@ test("summary requests share Files API upload and expired-reference recovery", a
   assert.equal(f.requests[1].messages.at(-1).content, getCompactPrompt());
   assert.match(JSON.stringify(f.requests[1].messages), /file-2/);
   assert.doesNotMatch(JSON.stringify(f.requests[1].messages), /base64/);
+});
+
+test("retention budgets use the input window and reject budgets at the effective threshold", () => {
+  assert.equal(compactBudget(1048576, 184320).retain, 157286);
+  assert.equal(compactBudget(100000, 50000, { retainRatio: 0.2 }).retain, 17500);
+  assert.equal(compactBudget(100000, 50000, { retainTokens: 1234 }).retain, 1234);
+  assert.equal(compactBudget(100000, 50000, { retainTokens: 0 }).retain, 0);
+  for (const retainTokens of [50000, 50001])
+    assert.throws(() => compactBudget(100000, 50000, { retainTokens }), /must be less/);
+  assert.throws(() => compactBudget(100000, 10000), /must be less/);
+  assert.throws(() => compactBudget(100000, 100000, { retainTokens: 75000 }), /must be less/);
+});
+
+test("actual usage calibrates image-heavy history downward while new images and text still count", async () => {
+  const images = Array.from({ length: 26 }, (_, i) => ({
+    type: "image_url",
+    image_url: { url: `data:image/png;base64,${i}` },
+  }));
+  const f = fixture([{ ...message("images"), contentParams: images }], () => ({
+    ...answer(),
+    usage: { prompt_tokens: 70106 },
+  }));
+  await f.run();
+  const context = await f.internal.prepareContext(f.read(), f.settings.model, true);
+  const measured = f.internal.measureRequest("compact-test", context.messages, f.settings.model);
+  assert.ok(measured.estimate > 100000);
+  assert.equal(measured.tokens, 70106);
+  const added = { ...message("new", "user", "new observations ".repeat(1000)), contentParams: images.slice(0, 1) };
+  f.internal.saveSessionMessages("compact-test", [...f.read(), added]);
+  const next = await f.internal.prepareContext(f.read(), f.settings.model, true);
+  const nextMeasurement = f.internal.measureRequest("compact-test", next.messages, f.settings.model);
+  assert.equal(nextMeasurement.tokens, 70106 + nextMeasurement.estimate - measured.estimate);
+  assert.ok(nextMeasurement.tokens > 70106 + 4096);
+  f.settings.autoCompactWindow = 100000;
+  await f.run();
+  assert.equal(f.requests.length, 2);
+  assert.ok(f.requests.every((request) => request.tool_choice !== "none"));
+});
+
+test("missing or invalid actual usage falls back to estimates, while zero is valid", async () => {
+  for (const prompt_tokens of [undefined, NaN, Infinity, -1, "4000", 0]) {
+    const f = fixture([message("old")], () => ({ ...answer(), usage: { prompt_tokens } }));
+    await f.run();
+    const context = await f.internal.prepareContext(f.read(), f.settings.model, true);
+    const measured = f.internal.measureRequest("compact-test", context.messages, f.settings.model);
+    assert.equal(measured.tokens, prompt_tokens === 0 ? 0 : measured.estimate);
+  }
+});
+
+test("automatic compaction honors the configured tail budget", async () => {
+  const retained: number[] = [];
+  for (const retainTokens of [7000, 20000]) {
+    const history = Array.from({ length: 10 }, (_, i) => message(`history-${i}`, "user", "x".repeat(20000)));
+    const f = fixture(history);
+    f.settings.contextWindow = 100000;
+    f.settings.autoCompactWindow = 50000;
+    f.settings.retainTokens = retainTokens;
+    await f.run();
+    assert.equal(f.requests.length, 2);
+    assert.equal(f.requests[0].tool_choice, "none");
+    retained.push(f.read().filter((m) => !m.compacted && !m.meta?.isSummary).length);
+  }
+  assert.deepEqual(retained, [2, 4]);
 });

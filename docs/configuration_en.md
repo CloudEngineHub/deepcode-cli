@@ -29,6 +29,8 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `env`              | object  | Group of environment variables (see sub-field table below)                 |
 | `contextWindow`   | number/string | Context-window limit as an exact token count or `128K`/`1M` value   |
 | `autoCompactWindow` | number/string | Auto-compaction threshold; defaults to 80% of the context window |
+| `retainRatio` | number | Budget for retaining recent conversation history after compaction, expressed as a fraction of the model's context window (default `0.16`, or 16%) |
+| `retainTokens` | number | Budget for retaining recent conversation history after compaction, expressed as an absolute token count; mutually exclusive with `retainRatio` |
 | `model`            | string  | Model name. Takes precedence over `env.MODEL`                              |
 | `thinkingEnabled`  | boolean | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)|
 | `reasoningEffort`  | string  | Reasoning intensity: `"low"`, `"high"`, or `"max"` (default `"max"`)    |
@@ -75,7 +77,24 @@ The following are all the top-level fields supported in `settings.json`, along w
 }
 ```
 
-The default context window is `256K` for regular models and `1M` for DeepSeek V4 models. If the auto-compaction threshold is omitted, it is 50% of the final context window. Invalid values are ignored, and an auto-compaction threshold larger than the context window is capped at the context window.
+The default context window is `256K` for regular models and `1M` for DeepSeek V4 models. If the auto-compaction threshold is omitted, it is 80% of the final context window. Invalid values are ignored, and an auto-compaction threshold larger than the context window is capped at the context window.
+
+#### Compaction retention
+
+`retainRatio` and `retainTokens` are top-level `settings.json` fields. Set at most one per configuration file. A project-level setting replaces the user-level retention choice; otherwise, the user setting is inherited. With neither set, `retainRatio` defaults to `0.16`.
+
+`retainRatio` must be a number in `(0, 1]`. Its budget is the context window minus the output reserve, multiplied by the ratio and rounded down. `retainTokens` must be a non-negative integer; `0` requests no extra tail retention. Strings such as `"32K"` are not supported.
+
+The resulting budget must be strictly below the effective auto-compaction threshold. Invalid configurations produce an error rather than silently reducing the retention budget. A low threshold may require an explicit smaller retention budget:
+
+```json
+{
+  "autoCompactWindow": "180K",
+  "retainTokens": 32768
+}
+```
+
+These settings apply to automatic compaction. Tool calls and their results stay together, so the retained tail may exceed the budget. Manual compaction and context-overflow recovery continue to use no extra tail retention.
 
 #### `thinkingEnabled` — Thinking Mode
 

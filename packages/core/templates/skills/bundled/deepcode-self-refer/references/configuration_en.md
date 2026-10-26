@@ -24,28 +24,30 @@ Deep Code uses the `settings.json` file for persistent configuration, supporting
 
 The following are all the top-level fields supported in `settings.json`, along with the sub-fields inside `env`:
 
-| Field                      | Type          | Description                                                                                                    |
-| -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
-| `env`                      | object        | Group of environment variables (see sub-field table below)                                                     |
-| `contextWindow`            | number/string | Context-window limit as an exact token count or `128K`/`1M` value                                              |
-| `autoCompactWindow`        | number/string | Auto-compaction threshold; defaults to 80% of the context window and may trigger earlier to reserve room for replies                                         |
-| `model`                    | string        | Model name. Defaults to `deepseek-v4-flash` and takes precedence over `env.MODEL`                              |
-| `thinkingEnabled`          | boolean       | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)                                    |
-| `reasoningEffort`          | string        | Reasoning intensity: `"low"`, `"high"`, or `"max"` (default `"max"`)                                           |
-| `filesApiEnabled`          | boolean       | Send images through the DeepSeek Files API (default `false`)                                                   |
-| `filesApiTimeoutMs`        | number        | Per-image Files API timeout; defaults to `60000`, maximum `600000` ms                                          |
-| `fileExpiresAfterSeconds`  | number        | Remote file lifetime, default `604800` seconds                                                                 |
-| `fileRefreshMarginSeconds` | number        | Refresh cached IDs below this remaining lifetime, default `3600` seconds                                       |
-| `fileQuotaCleanupBatch`    | number        | Oldest Deep Code files removed during quota recovery, default `100`                                            |
-| `maxRequestFilesBytes`     | number        | Raw image byte limit per request, default `134217728` (128 MiB)                                                |
-| `debugLogEnabled`          | boolean       | Enable debug log output (default `false`)                                                                      |
-| `telemetryEnabled`         | boolean       | Enable anonymous usage reporting (default `true`)                                                              |
-| `notify`                   | string        | Full path to a task-completion notification script (e.g., Slack notification script)                           |
-| `webSearchTool`            | string        | Full path to a custom web search script                                                                        |
-| `mcpServers`               | object        | MCP server configurations (keys are service names, values are McpServerConfig objects)                         |
-| `temperature`              | number        | Sampling temperature for LLM, from `0` to `2`                                                                  |
-| `permissions`              | object        | Permission policy and additional `addWorkingDirs` workspace roots (see [permission_en.md](./permission_en.md)) |
-| `enabledSkills`            | object        | Per-skill enable/disable map, keyed by skill name                                                              |
+| Field                      | Type          | Description                                                                                                          |
+| -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `env`                      | object        | Group of environment variables (see sub-field table below)                                                           |
+| `contextWindow`            | number/string | Context-window limit as an exact token count or `128K`/`1M` value                                                    |
+| `autoCompactWindow`        | number/string | Auto-compaction threshold; defaults to 80% of the context window and may trigger earlier to reserve room for replies |
+| `retainRatio`              | number        | Recent conversation retained as a fraction of the context window minus the output reserve; defaults to `0.16`        |
+| `retainTokens`             | number        | Absolute token budget for recent conversation; mutually exclusive with `retainRatio`                                 |
+| `model`                    | string        | Model name. Defaults to `deepseek-v4-flash` and takes precedence over `env.MODEL`                                    |
+| `thinkingEnabled`          | boolean       | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)                                          |
+| `reasoningEffort`          | string        | Reasoning intensity: `"low"`, `"high"`, or `"max"` (default `"max"`)                                                 |
+| `filesApiEnabled`          | boolean       | Send images through the DeepSeek Files API (default `false`)                                                         |
+| `filesApiTimeoutMs`        | number        | Per-image Files API timeout; defaults to `60000`, maximum `600000` ms                                                |
+| `fileExpiresAfterSeconds`  | number        | Remote file lifetime, default `604800` seconds                                                                       |
+| `fileRefreshMarginSeconds` | number        | Refresh cached IDs below this remaining lifetime, default `3600` seconds                                             |
+| `fileQuotaCleanupBatch`    | number        | Oldest Deep Code files removed during quota recovery, default `100`                                                  |
+| `maxRequestFilesBytes`     | number        | Raw image byte limit per request, default `134217728` (128 MiB)                                                      |
+| `debugLogEnabled`          | boolean       | Enable debug log output (default `false`)                                                                            |
+| `telemetryEnabled`         | boolean       | Enable anonymous usage reporting (default `true`)                                                                    |
+| `notify`                   | string        | Full path to a task-completion notification script (e.g., Slack notification script)                                 |
+| `webSearchTool`            | string        | Full path to a custom web search script                                                                              |
+| `mcpServers`               | object        | MCP server configurations (keys are service names, values are McpServerConfig objects)                               |
+| `temperature`              | number        | Sampling temperature for LLM, from `0` to `2`                                                                        |
+| `permissions`              | object        | Permission policy and additional `addWorkingDirs` workspace roots (see [permission_en.md](./permission_en.md))       |
+| `enabledSkills`            | object        | Per-skill enable/disable map, keyed by skill name                                                                    |
 
 #### `env` Sub-fields
 
@@ -72,7 +74,24 @@ The following are all the top-level fields supported in `settings.json`, along w
 }
 ```
 
-The default context window is `256K` for regular models and `1M` for DeepSeek V4 models. If the auto-compaction threshold is omitted, it is 50% of the final context window. Invalid values are ignored, and an auto-compaction threshold larger than the context window is capped at the context window.
+The default context window is `256K` for regular models and `1M` for DeepSeek V4 models. If the auto-compaction threshold is omitted, it is 80% of the final context window. Invalid values are ignored, and an auto-compaction threshold larger than the context window is capped at the context window.
+
+#### Compaction retention
+
+`retainRatio` and `retainTokens` are top-level `settings.json` fields. Set at most one per configuration file. A project-level setting replaces the user-level retention choice; otherwise, the user setting is inherited. With neither set, `retainRatio` defaults to `0.16`.
+
+`retainRatio` must be a number in `(0, 1]`. Its budget is the context window minus the output reserve, multiplied by the ratio and rounded down. `retainTokens` must be a non-negative integer; `0` requests no extra tail retention. Strings such as `"32K"` are not supported.
+
+The resulting budget must be strictly below the effective auto-compaction threshold. Invalid configurations produce an error rather than silently reducing the retention budget. A low threshold may require an explicit smaller retention budget:
+
+```json
+{
+  "autoCompactWindow": "180K",
+  "retainTokens": 32768
+}
+```
+
+These settings apply to automatic compaction. Tool calls and their results stay together, so the retained tail may exceed the budget. Manual compaction and context-overflow recovery continue to use no extra tail retention.
 
 #### `thinkingEnabled` — Thinking Mode
 
