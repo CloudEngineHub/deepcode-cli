@@ -14,6 +14,7 @@ import {
   buildSkillCatalogPrompt,
   buildSkillDocumentsPrompt,
   getCompactPrompt,
+  frameCompactSummary,
   getExtensionRoot,
   getPlanModePrompt,
   getRuntimeContext,
@@ -41,6 +42,7 @@ import {
   DEFAULT_FILES_API_TIMEOUT_MS,
   DEFAULT_MAX_REQUEST_FILES_BYTES,
   getDefaultAutoCompactWindow,
+  getDefaultContextWindow,
   type McpServerConfig,
   type PermissionScope,
   type PermissionSettings,
@@ -73,6 +75,14 @@ import {
   type DeepSeekFileReference,
   type DeepSeekFilesPolicy,
 } from "./common/deepseek-files";
+import {
+  compactBudget,
+  compactPrefixes,
+  estimateRequestTokens,
+  imageOffloadCount,
+  isContextOverflow,
+  isFixedContext,
+} from "./common/compaction";
 import { loadImageFile } from "./tools/image-file";
 import {
   getLlmRetryDelayMs,
@@ -310,6 +320,7 @@ export type MessageMeta = {
   asThinking?: boolean;
   isAnswers?: boolean;
   isSummary?: boolean;
+  omittedImages?: string[];
   isModelChange?: boolean;
   skill?: SkillInfo;
   skillCatalog?: Array<{ name: string; description: string }>;
@@ -517,7 +528,19 @@ export class SessionManager {
     this.sessionControllers.clear();
     this.processTimeoutControls.clear();
     this.mcpManager.disconnect();
+    this.requestUsageAnchors.clear();
   }
+
+  private readonly compactingSessions = new Set<string>();
+  private readonly requestUsageAnchors = new Map<
+    string,
+    {
+      route: string;
+      hashes: string[];
+      estimate: number;
+      tokens: number;
+    }
+  >();
 
   private estimateStreamTokens(text: string): number {
     let tokens = 0;
@@ -691,7 +714,7 @@ export class SessionManager {
     sessionId?: string,
     debug?: ChatCompletionDebugOptions
   ): Promise<{
-    choices?: Array<{ message?: Record<string, unknown> }>;
+    choices?: Array<{ message?: Record<string, unknown>; finish_reason?: string | null }>;
     usage?: ModelUsage | null;
   }> {
     const requestId = crypto.randomUUID();
@@ -733,7 +756,7 @@ export class SessionManager {
     debug: ChatCompletionDebugOptions | undefined,
     requestId: string
   ): Promise<{
-    choices?: Array<{ message?: Record<string, unknown> }>;
+    choices?: Array<{ message?: Record<string, unknown>; finish_reason?: string | null }>;
     usage?: ModelUsage | null;
   }> {
     const startedAt = new Date().toISOString();
@@ -838,7 +861,10 @@ export class SessionManager {
         request: streamRequest,
         response,
       });
-      return response as { choices?: Array<{ message?: Record<string, unknown> }>; usage?: ModelUsage | null };
+      return response as {
+        choices?: Array<{ message?: Record<string, unknown>; finish_reason?: string | null }>;
+        usage?: ModelUsage | null;
+      };
     }
 
     let content = "";
@@ -846,6 +872,7 @@ export class SessionManager {
     let refusal: string | null = null;
     let usage: ModelUsage | null = null;
     let streamCompleted = false;
+    let finishReason: string | null = null;
     const responseChunks: unknown[] = [];
     const toolCallsByIndex = new Map<
       number,
@@ -889,6 +916,7 @@ export class SessionManager {
         for (const choice of choices) {
           if (isUsageRecord(choice) && choice.finish_reason != null) {
             streamCompleted = true;
+            if (typeof choice.finish_reason === "string") finishReason = choice.finish_reason;
           }
           const delta = isUsageRecord(choice) && isUsageRecord(choice.delta) ? choice.delta : null;
           if (!delta) {
@@ -992,7 +1020,7 @@ export class SessionManager {
     }
 
     const finalResponse = {
-      choices: [{ message }],
+      choices: [{ message, finish_reason: finishReason }],
       usage,
     };
     this.logChatCompletionDebug(debug, {
@@ -1672,20 +1700,7 @@ ${agentInstructions}
     permissionPrompt?: UserPromptContent
   ): Promise<void> {
     const startedAt = Date.now();
-    const {
-      client,
-      usingPlus,
-      configurationError,
-      apiKey,
-      model,
-      baseURL,
-      temperature,
-      thinkingEnabled,
-      reasoningEffort,
-      debugLogEnabled,
-      notify,
-      env,
-    } = this.createOpenAIClient();
+    const { client, usingPlus, configurationError, model, notify, env } = this.createOpenAIClient();
     const now = new Date().toISOString();
     rebuildSessionStateFromHistory(sessionId, this.listSessionMessages(sessionId));
 
@@ -1769,87 +1784,7 @@ ${agentInstructions}
           }
         }
 
-        const compactPromptTokenThreshold =
-          this.getResolvedSettings().autoCompactWindow ?? getCompactPromptTokenThreshold(model);
-        if (session.activeTokens > compactPromptTokenThreshold) {
-          const message = this.buildAssistantMessage(
-            sessionId,
-            "The conversation is getting long, compacting...",
-            null
-          );
-          message.meta = { asThinking: true };
-          this.onAssistantMessage(message, false);
-          await this.compactSession(sessionId, sessionController.signal);
-        }
-
-        const sessionMessages = await this.attachPromptImagesForRequest(
-          this.prepareSessionMessagesForRequest(this.listSessionMessages(sessionId)),
-          model,
-          this.getResolvedSettings().multimodal
-        );
-        if (this.isInterrupted(sessionId)) {
-          return;
-        }
-        const filesSettings = this.getDeepSeekFilesSettings();
-        if (filesSettings.enabled && !apiKey) {
-          throw new Error("Files API is enabled, but no API key is available for uploads.");
-        }
-        let prepared = filesSettings.enabled
-          ? await this.buildMessagesWithDeepSeekFiles(
-              sessionMessages,
-              thinkingEnabled,
-              model,
-              apiKey!,
-              sessionController.signal
-            )
-          : {
-              messages: this.messageConverter.buildMessages(
-                sessionMessages,
-                thinkingEnabled,
-                model,
-                this.getResolvedSettings().multimodal
-              ),
-              references: [] as DeepSeekFileReference[],
-            };
-        const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
-        const request = () =>
-          this.createChatCompletionStream(
-            client,
-            {
-              model,
-              ...(temperature !== undefined ? { temperature } : {}),
-              messages: prepared.messages,
-              tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
-              ...thinkingOptions,
-            },
-            { signal: sessionController.signal },
-            sessionId,
-            {
-              enabled: debugLogEnabled,
-              location: "SessionManager.activateSession",
-              baseURL,
-              params: { iteration, temperature, thinkingEnabled, reasoningEffort },
-            }
-          );
-        let response: Awaited<ReturnType<typeof request>>;
-        try {
-          response = await request();
-        } catch (error) {
-          if (!filesSettings.enabled || prepared.references.length === 0 || !this.isRejectedDeepSeekFile(error)) {
-            throw error;
-          }
-          for (const reference of prepared.references) {
-            this.deepSeekFiles.invalidate(reference, apiKey!);
-          }
-          prepared = await this.buildMessagesWithDeepSeekFiles(
-            sessionMessages,
-            thinkingEnabled,
-            model,
-            apiKey!,
-            sessionController.signal
-          );
-          response = await request();
-        }
+        const response = await this.requestSessionCompletion(sessionId, sessionController.signal, iteration);
 
         const message = response.choices?.[0]?.message;
         const rawContent = message?.content;
@@ -1977,93 +1912,378 @@ ${agentInstructions}
     }
   }
 
-  async compactSession(sessionId: string, signal?: AbortSignal): Promise<void> {
-    this.throwIfAborted(signal);
-    const { client, model, baseURL, temperature, thinkingEnabled, reasoningEffort, debugLogEnabled } =
-      this.createOpenAIClient();
-    if (!client) {
-      return;
-    }
-    const sessionMessages = this.listSessionMessages(sessionId).filter((message) => !message.compacted);
-    if (sessionMessages.length === 0) {
-      return;
-    }
+  private getCompactionBudget(model: string) {
+    const settings = this.getResolvedSettings();
+    return compactBudget(settings.contextWindow ?? getDefaultContextWindow(model), settings.autoCompactWindow);
+  }
 
-    const startIndex = sessionMessages.findIndex((message) => message.role !== "system");
-    if (startIndex === -1) {
-      return;
-    }
-
-    const searchStart = Math.floor(startIndex + ((sessionMessages.length - startIndex) * 2) / 3);
-    let endIndex = -1;
-    for (let i = Math.max(searchStart, startIndex); i < sessionMessages.length; i += 1) {
-      if (sessionMessages[i].role !== "tool") {
-        endIndex = i;
-        break;
-      }
-    }
-    if (endIndex === -1 || endIndex <= startIndex) {
-      return;
-    }
-
-    const compactPrompt = getCompactPrompt(sessionMessages.slice(startIndex, endIndex));
-    const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
-    const response = await this.createChatCompletionStream(
-      client,
-      {
-        model,
-        ...(temperature !== undefined ? { temperature } : {}),
-        messages: [{ role: "user", content: compactPrompt }],
-        ...thinkingOptions,
-      },
-      signal ? { signal } : undefined,
-      sessionId,
-      {
-        enabled: debugLogEnabled,
-        location: "SessionManager.compactSession",
-        baseURL,
-        params: { temperature, thinkingEnabled, reasoningEffort },
-      }
+  /** Derive exactly the content used by both normal and summary requests, before uploads. */
+  private async prepareContext(messages: SessionMessage[], model: string, thinkingEnabled: boolean) {
+    const sources = await this.attachPromptImagesForRequest(
+      this.prepareSessionMessagesForRequest(
+        messages
+          .filter((message) => !message.compacted)
+          .map((message) =>
+            message.meta?.isSummary && message.role === "system"
+              ? {
+                  ...message,
+                  role: "user" as const,
+                  content: frameCompactSummary(message.content ?? ""),
+                }
+              : message
+          )
+      ),
+      model,
+      this.getResolvedSettings().multimodal
     );
-    this.throwIfAborted(signal);
-    const rawLlmResponse = response.choices?.[0]?.message?.content;
-    const llmResponse = typeof rawLlmResponse === "string" ? rawLlmResponse : "";
-    const compactedSummary = llmResponse.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "").trim();
+    const converted = this.messageConverter.buildMessages(
+      sources,
+      thinkingEnabled,
+      model,
+      this.getDeepSeekFilesSettings().enabled ? "on" : this.getResolvedSettings().multimodal
+    );
+    return { sources, messages: converted };
+  }
 
-    const now = new Date().toISOString();
-    const responseUsage = response.usage ?? null;
-    this.updateSessionEntry(sessionId, (entry) => ({
-      ...entry,
-      usage: accumulateUsage(entry.usage, responseUsage),
-      usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-      activeTokens: getTotalTokens(responseUsage),
-      updateTime: now,
-    }));
+  private measureRequest(sessionId: string, messages: ChatCompletionMessageParam[], model: string) {
+    const tools = getTools(this.getPromptToolOptions(), this.mcpToolDefinitions);
+    const client = this.createOpenAIClient();
+    const route = JSON.stringify([model, client.baseURL, client.thinkingEnabled, client.reasoningEffort, tools]);
+    const hashes = messages.map((message) => crypto.createHash("sha256").update(JSON.stringify(message)).digest("hex"));
+    const estimate = estimateRequestTokens(messages, tools);
+    const anchor = this.requestUsageAnchors.get(sessionId);
+    const anchored =
+      anchor?.route === route &&
+      anchor.hashes.length <= hashes.length &&
+      anchor.hashes.every((hash, index) => hash === hashes[index]);
+    const tokens = anchored ? Math.max(estimate, anchor.tokens + estimate - anchor.estimate) : estimate;
+    return { route, hashes, estimate, tokens };
+  }
 
-    for (let i = startIndex; i < endIndex; i += 1) {
-      if (sessionMessages[i].meta?.skillCatalog) {
-        continue;
-      }
-      sessionMessages[i] = { ...sessionMessages[i], compacted: true, updateTime: now };
+  /** Shared file-reference recovery; it never repeats tool execution. */
+  private async sendPreparedCompletion(
+    sources: SessionMessage[],
+    messages: ChatCompletionMessageParam[],
+    extra: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal,
+    location: string
+  ) {
+    const { client, model, apiKey, baseURL, temperature, thinkingEnabled, reasoningEffort, debugLogEnabled } =
+      this.createOpenAIClient();
+    if (!client) throw new Error("No model client is configured.");
+    const files = this.getDeepSeekFilesSettings();
+    if (files.enabled && !apiKey) throw new Error("Files API is enabled, but no API key is available for uploads.");
+    // The final summary instruction is not a durable session source.
+    const suffix = extra.compaction === true ? [{ role: "user" as const, content: getCompactPrompt() }] : [];
+    const requestExtra = { ...extra };
+    delete requestExtra.compaction;
+    const prepare = async () =>
+      files.enabled
+        ? await this.buildMessagesWithDeepSeekFiles(sources, thinkingEnabled, model, apiKey!, signal)
+        : { messages, references: [] as DeepSeekFileReference[] };
+    let prepared = await prepare();
+    const request = () =>
+      this.createChatCompletionStream(
+        client,
+        {
+          model,
+          ...(temperature !== undefined ? { temperature } : {}),
+          messages: [...prepared.messages, ...suffix],
+          tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
+          ...buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort),
+          ...requestExtra,
+        },
+        { signal },
+        sessionId,
+        {
+          enabled: debugLogEnabled,
+          location,
+          baseURL,
+          params: { temperature, thinkingEnabled, reasoningEffort },
+        }
+      );
+    try {
+      return await request();
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!files.enabled || !prepared.references.length || !this.isRejectedDeepSeekFile(error)) throw error;
+      for (const reference of prepared.references) this.deepSeekFiles.invalidate(reference, apiKey!);
+      prepared = await prepare();
+      return await request();
     }
+  }
 
-    const summaryMessage: SessionMessage = {
-      id: crypto.randomUUID(),
-      sessionId,
-      role: "system",
-      content: `There are earlier parts of the conversation. Here is a summary: \n\n${compactedSummary}`,
-      contentParams: null,
-      messageParams: null,
-      compacted: false,
-      visible: false,
-      createTime: now,
-      updateTime: now,
-      meta: {
-        isSummary: true,
-      },
-    };
-    sessionMessages.splice(endIndex, 0, summaryMessage);
-    this.saveSessionMessages(sessionId, sessionMessages);
+  private async requestSessionCompletion(sessionId: string, signal: AbortSignal, iteration: number) {
+    const { model, thinkingEnabled } = this.createOpenAIClient();
+    const budget = this.getCompactionBudget(model);
+    let context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
+    let measurement = this.measureRequest(sessionId, context.messages, model);
+    for (let attempt = 0; measurement.tokens >= budget.threshold && attempt < 2; attempt++) {
+      if (attempt === 0) {
+        const notice = this.buildAssistantMessage(sessionId, "The conversation is getting long, compacting...", null);
+        notice.meta = { asThinking: true };
+        this.onAssistantMessage(notice, false);
+      }
+      const changed = await this.compactSessionOnce(sessionId, signal, budget.retain);
+      if (!changed) break;
+      context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
+      measurement = this.measureRequest(sessionId, context.messages, model);
+    }
+    if (measurement.tokens >= budget.threshold) {
+      throw new Error("The conversation is too large to compact safely. Shorten the input or start a new session.");
+    }
+    let overflowRecovered = false;
+    for (;;) {
+      signal.throwIfAborted();
+      try {
+        const response = await this.sendPreparedCompletion(
+          context.sources,
+          context.messages,
+          {},
+          sessionId,
+          signal,
+          `SessionManager.activateSession:${iteration}`
+        );
+        const promptTokens = response.usage?.prompt_tokens;
+        this.requestUsageAnchors.set(sessionId, {
+          ...measurement,
+          tokens: Math.max(
+            measurement.estimate,
+            typeof promptTokens === "number" ? promptTokens : measurement.estimate
+          ),
+        });
+        return response;
+      } catch (error) {
+        signal.throwIfAborted();
+        const count = imageOffloadCount(error);
+        if (
+          count > 0 &&
+          this.offloadSessionImages(
+            sessionId,
+            context.sources.map((message) => message.id),
+            count
+          )
+        ) {
+          this.requestUsageAnchors.delete(sessionId);
+        } else if (!overflowRecovered && isContextOverflow(error)) {
+          overflowRecovered = true;
+          if (!(await this.compactSessionOnce(sessionId, signal, 0))) throw error;
+        } else throw error;
+        context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
+        measurement = this.measureRequest(sessionId, context.messages, model);
+        if (measurement.tokens > budget.input)
+          throw new Error("The conversation still exceeds the model context window.");
+      }
+    }
+  }
+
+  async compactSession(sessionId: string, signal?: AbortSignal): Promise<void> {
+    await this.compactSessionOnce(sessionId, signal ?? new AbortController().signal, 0);
+  }
+
+  /** Commit only a complete, smaller checkpoint against an unchanged selected history. */
+  private async compactSessionOnce(sessionId: string, signal: AbortSignal, retain: number): Promise<boolean> {
+    signal.throwIfAborted();
+    if (this.compactingSessions.has(sessionId)) throw new Error("This session is already being compacted.");
+    this.compactingSessions.add(sessionId);
+    try {
+      const { client, model, thinkingEnabled } = this.createOpenAIClient();
+      if (!client) return false;
+      const budget = this.getCompactionBudget(model);
+      let active = this.listSessionMessages(sessionId).filter((message) => !message.compacted);
+      let context = await this.prepareContext(active, model, thinkingEnabled);
+      const prices = context.sources.map((message) =>
+        estimateRequestTokens(
+          message.role === "tool"
+            ? [{ role: "tool", content: message.content ?? "", tool_call_id: "" }]
+            : this.messageConverter.buildMessages(
+                [message],
+                thinkingEnabled,
+                model,
+                this.getResolvedSettings().multimodal
+              )
+        )
+      );
+      const prefixes = compactPrefixes(active, prices, retain);
+      let overflowRetried = false;
+      let maxPrefix = Infinity;
+      for (;;) {
+        signal.throwIfAborted();
+        let selected: SessionMessage[] | undefined;
+        let replay: Awaited<ReturnType<SessionManager["prepareContext"]>> | undefined;
+        for (const end of prefixes.ends) {
+          if (end >= maxPrefix) continue;
+          const prefix = prefixes.history.slice(0, end);
+          const ids = new Set(prefix.map((message) => message.id));
+          const candidate = await this.prepareContext(
+            active.filter((message) => isFixedContext(message) || ids.has(message.id)),
+            model,
+            thinkingEnabled
+          );
+          const cost = estimateRequestTokens(
+            [...candidate.messages, { role: "user", content: getCompactPrompt() }],
+            getTools(this.getPromptToolOptions(), this.mcpToolDefinitions)
+          );
+          if (cost <= budget.input) {
+            selected = prefix;
+            replay = candidate;
+            break;
+          }
+        }
+        if (!selected || !replay) {
+          if (prefixes.ends.length === 0) return false;
+          throw new Error(
+            "The conversation is too large to summarize safely. Shorten the input or start a new session."
+          );
+        }
+        const selectedIds = new Set(selected.map((message) => message.id));
+        const firstSelectedId = selected[0].id;
+        const snapshot = JSON.stringify(active);
+        let response: Awaited<ReturnType<SessionManager["sendPreparedCompletion"]>>;
+        try {
+          response = await this.sendPreparedCompletion(
+            replay.sources,
+            replay.messages,
+            { compaction: true, max_tokens: budget.output, tool_choice: "none" },
+            sessionId,
+            signal,
+            "SessionManager.compactSession"
+          );
+        } catch (error) {
+          signal.throwIfAborted();
+          if (
+            JSON.stringify(this.listSessionMessages(sessionId).filter((message) => !message.compacted)) !== snapshot
+          ) {
+            throw new Error("The conversation changed during compaction. Please try again.");
+          }
+          const count = imageOffloadCount(error);
+          if (
+            count > 0 &&
+            this.offloadSessionImages(
+              sessionId,
+              replay.sources.map((message) => message.id),
+              count
+            )
+          ) {
+            active = this.listSessionMessages(sessionId).filter((message) => !message.compacted);
+            context = await this.prepareContext(active, model, thinkingEnabled);
+            this.requestUsageAnchors.delete(sessionId);
+            continue;
+          }
+          if (!overflowRetried && isContextOverflow(error)) {
+            overflowRetried = true;
+            // Reduce substantially, rather than retrying an almost identical prefix.
+            maxPrefix = Math.max(2, Math.ceil(selected.length / 2) + 1);
+            maxPrefix = Math.min(maxPrefix, selected.length);
+            continue;
+          }
+          throw error;
+        }
+        signal.throwIfAborted();
+        const now = new Date().toISOString();
+        const usage = response.usage ?? null;
+        this.updateSessionEntry(sessionId, (entry) => ({
+          ...entry,
+          usage: accumulateUsage(entry.usage, usage),
+          usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, usage),
+          updateTime: now,
+        }));
+        const choice = response.choices?.[0];
+        const output = choice?.message;
+        const text =
+          typeof output?.content === "string"
+            ? output.content.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "").trim()
+            : "";
+        if (
+          !text ||
+          output?.refusal ||
+          (Array.isArray(output?.tool_calls) && output.tool_calls.length > 0) ||
+          (choice?.finish_reason != null && choice.finish_reason !== "stop")
+        ) {
+          throw new Error("Compaction did not produce a complete text summary. The original conversation was kept.");
+        }
+        const summary: SessionMessage = {
+          id: crypto.randomUUID(),
+          sessionId,
+          role: "user",
+          content: frameCompactSummary(text),
+          contentParams: null,
+          messageParams: null,
+          compacted: false,
+          visible: false,
+          createTime: now,
+          updateTime: now,
+          meta: { isSummary: true },
+        };
+        const replacement = active.flatMap((message) =>
+          message.id === firstSelectedId ? [summary] : selectedIds.has(message.id) ? [] : [message]
+        );
+        const next = await this.prepareContext(replacement, model, thinkingEnabled);
+        if (estimateRequestTokens(next.messages) >= estimateRequestTokens(context.messages)) {
+          throw new Error("Compaction did not reduce the conversation size. The original conversation was kept.");
+        }
+        signal.throwIfAborted();
+        const current = this.listSessionMessages(sessionId);
+        if (JSON.stringify(current.filter((message) => !message.compacted)) !== snapshot) {
+          throw new Error("The conversation changed during compaction. Please try again.");
+        }
+        const committed = current.flatMap((message) => {
+          const marked = selectedIds.has(message.id) ? { ...message, compacted: true, updateTime: now } : message;
+          return message.id === firstSelectedId ? [summary, marked] : [marked];
+        });
+        this.saveSessionMessages(sessionId, committed);
+        this.requestUsageAnchors.delete(sessionId);
+        const tokens = estimateRequestTokens(
+          next.messages,
+          getTools(this.getPromptToolOptions(), this.mcpToolDefinitions)
+        );
+        this.updateSessionEntry(sessionId, (entry) => ({ ...entry, activeTokens: tokens, updateTime: now }));
+        return true;
+      }
+    } finally {
+      this.compactingSessions.delete(sessionId);
+    }
+  }
+
+  private offloadSessionImages(sessionId: string, sourceIds: string[], count: number): boolean {
+    const { model } = this.createOpenAIClient();
+    const multimodal = supportsMultimodal(model, this.getResolvedSettings().multimodal);
+    if (!multimodal && !this.getDeepSeekFilesSettings().enabled) return false;
+    const sources = new Set(sourceIds);
+    let changed = false;
+    const messages = this.listSessionMessages(sessionId).map((message) => {
+      if (!sources.has(message.id) || message.compacted || (message.role !== "user" && message.role !== "system"))
+        return message;
+      const omitted = new Set(message.meta?.omittedImages ?? []);
+      const params = Array.isArray(message.contentParams)
+        ? message.contentParams
+        : message.contentParams
+          ? [message.contentParams]
+          : [];
+      const keys = params.flatMap((part, index) => (part?.type === "image_url" ? [`content:${index}`] : []));
+      if (message.role === "user" && multimodal) {
+        (message.meta?.userPrompt?.imageUrls ?? []).forEach((url, index) => {
+          if (this.getLocalPromptImagePath(url) || /^https?:\/\//i.test(url)) keys.push(`prompt:${index}`);
+        });
+      }
+      for (const key of keys) {
+        if (count <= 0) break;
+        if (omitted.has(key)) continue;
+        omitted.add(key);
+        count--;
+        changed = true;
+      }
+      return omitted.size === (message.meta?.omittedImages?.length ?? 0)
+        ? message
+        : {
+            ...message,
+            meta: { ...message.meta, omittedImages: [...omitted] },
+            updateTime: new Date().toISOString(),
+          };
+    });
+    if (changed) this.saveSessionMessages(sessionId, messages);
+    return changed;
   }
 
   private getPromptToolOptions(): {
@@ -2106,54 +2326,44 @@ ${agentInstructions}
     multimodal: MultimodalMode = "default"
   ): Promise<SessionMessage[]> {
     const includeImageContent = supportsMultimodal(model, multimodal);
-    const prepared = await Promise.all(
+    return await Promise.all(
       messages.map(async (message) => {
-        const imageUrls = message.role === "user" ? message.meta?.userPrompt?.imageUrls : undefined;
-        const promptImages: Array<{ source: "file" | "url"; value: string }> = [];
-        for (const imageUrl of imageUrls ?? []) {
-          const filePath = this.getLocalPromptImagePath(imageUrl);
-          if (filePath) {
-            promptImages.push({ source: "file", value: filePath });
-          } else if (/^https?:\/\//i.test(imageUrl)) {
-            promptImages.push({ source: "url", value: imageUrl });
-          }
-        }
-        if (promptImages.length === 0) {
-          return message;
-        }
-
-        const contentParams = Array.isArray(message.contentParams)
-          ? [...message.contentParams]
+        const omitted = new Set(message.meta?.omittedImages ?? []);
+        const params = Array.isArray(message.contentParams)
+          ? message.contentParams
           : message.contentParams
             ? [message.contentParams]
             : [];
-        if (includeImageContent) {
-          const imageParts = await Promise.all(
-            promptImages.map(async ({ source, value }) => {
-              if (source === "url") {
-                return { type: "image_url", image_url: { url: value } };
-              }
-              const { image } = await loadImageFile(value, this.loadSharp);
-              return {
-                type: "image_url",
-                image_url: { url: `data:${image.mediaType};base64,${image.data.toString("base64")}` },
-              };
-            })
-          );
-          for (const imagePart of imageParts) {
-            contentParams.push(imagePart);
+        const contentParams = params.map((part, index) => {
+          if (part?.type !== "image_url" || !omitted.has(`content:${index}`)) return part;
+          const url = typeof part.image_url?.url === "string" ? part.image_url.url : "";
+          const reference = url.startsWith("data:") ? `session attachment ${message.id}/content:${index}` : url;
+          return { type: "text", text: `[Image omitted: ${reference}]` };
+        });
+        const imageUrls = message.role === "user" ? (message.meta?.userPrompt?.imageUrls ?? []) : [];
+        for (const [index, imageUrl] of imageUrls.entries()) {
+          const filePath = this.getLocalPromptImagePath(imageUrl);
+          if (!filePath && !/^https?:\/\//i.test(imageUrl)) continue;
+          if (omitted.has(`prompt:${index}`)) {
+            contentParams.push({ type: "text", text: `[Image omitted: ${filePath ?? imageUrl}]` });
+          } else if (!includeImageContent) {
+            contentParams.push({
+              type: "text",
+              text: `<message_meta>\n${JSON.stringify({ images: [filePath ?? imageUrl] }, null, 2)}\n</message_meta>`,
+            });
+          } else if (filePath) {
+            const { image } = await loadImageFile(filePath, this.loadSharp);
+            contentParams.push({
+              type: "image_url",
+              image_url: { url: `data:${image.mediaType};base64,${image.data.toString("base64")}` },
+            });
+          } else {
+            contentParams.push({ type: "image_url", image_url: { url: imageUrl } });
           }
         }
-        if (!includeImageContent) {
-          contentParams.push({
-            type: "text",
-            text: `<message_meta>\n${JSON.stringify({ images: promptImages.map(({ value }) => value) }, null, 2)}\n</message_meta>`,
-          });
-        }
-        return { ...message, contentParams };
+        return contentParams.length || params.length ? { ...message, contentParams } : message;
       })
     );
-    return prepared;
   }
 
   private getLocalPromptImagePath(imageUrl: string): string | null {
@@ -2663,6 +2873,7 @@ ${agentInstructions}
       this.killTrackedProcess(processControlKey, pid);
     }
 
+    this.requestUsageAnchors.delete(sessionId);
     clearSessionState(sessionId);
     clearSessionWorkingDir(sessionId);
     const controller = this.sessionControllers.get(sessionId);
@@ -2690,7 +2901,13 @@ ${agentInstructions}
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
     const payload = messages.map((message) => JSON.stringify(message)).join("\n");
-    fs.writeFileSync(messagePath, payload ? `${payload}\n` : "", "utf8");
+    const temporaryPath = `${messagePath}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporaryPath, payload ? `${payload}\n` : "", "utf8");
+      fs.renameSync(temporaryPath, messagePath);
+    } finally {
+      fs.rmSync(temporaryPath, { force: true });
+    }
   }
 
   private updateSessionEntry(sessionId: string, updater: (entry: SessionEntry) => SessionEntry): SessionEntry | null {

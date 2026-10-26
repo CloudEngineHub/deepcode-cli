@@ -158,7 +158,7 @@ export function getDefaultContextWindow(model: string): number {
 }
 
 export function getDefaultAutoCompactWindow(model: string): number {
-  return getDefaultContextWindow(model) / 2;
+  return Math.floor(getDefaultContextWindow(model) * 0.8);
 }
 
 function parseTokenWindow(value: unknown): number | undefined {
@@ -605,7 +605,7 @@ export function resolveSettingsSources(
     projectSettings?.autoCompactWindow,
     userSettings?.autoCompactWindow
   );
-  const defaultAutoCompactWindow = Math.max(1, Math.floor(contextWindow / 2));
+  const defaultAutoCompactWindow = Math.max(1, Math.floor(contextWindow * 0.8));
   const autoCompactWindow = Math.min(configuredAutoCompactWindow ?? defaultAutoCompactWindow, contextWindow);
 
   const thinkingEnabled =
