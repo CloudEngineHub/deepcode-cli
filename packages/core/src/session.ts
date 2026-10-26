@@ -2086,8 +2086,8 @@ ${agentInstructions}
     }
   }
 
-  async compactSession(sessionId: string, signal?: AbortSignal): Promise<void> {
-    await this.compactSessionOnce(sessionId, signal ?? new AbortController().signal, 0);
+  async compactSession(sessionId: string, signal?: AbortSignal): Promise<boolean> {
+    return await this.compactSessionOnce(sessionId, signal ?? new AbortController().signal, 0);
   }
 
   /** Commit only a complete, smaller checkpoint against an unchanged selected history. */

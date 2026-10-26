@@ -100,6 +100,27 @@ function compactPrefixes(history: SessionMessage[], prices: number[], retain: nu
   return selection.ends.map((end) => selection.history.slice(0, end));
 }
 
+test("manual compaction reports whether it changed history", async () => {
+  const empty = fixture([]);
+  assert.equal(await empty.compact(), false);
+  assert.equal(empty.requests.length, 0);
+  const short = fixture([message("only")]);
+  assert.equal(await short.compact(), false);
+  assert.equal(short.requests.length, 0);
+  const history = [message("older"), message("reply", "assistant"), message("tail")];
+  const ready = fixture(history);
+  assert.equal(await ready.compact(), true);
+  assert.equal(ready.requests.length, 1);
+  assert.deepEqual(
+    ready
+      .read()
+      .filter((item) => item.visible)
+      .map((item) => item.id),
+    history.map((item) => item.id)
+  );
+  assert.equal(ready.read().find((item) => item.meta?.isSummary)?.visible, false);
+});
+
 test("request estimates include reasoning and tools without charging image base64 as text", () => {
   const request = (data: string) => [
     {
