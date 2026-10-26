@@ -59,8 +59,10 @@ async function harness(t: TestContext, compact: (signal: AbortSignal) => Promise
   const prompt = t.mock.method(SessionManager.prototype, "handleUserPrompt", async () => {});
   const interrupt = t.mock.method(SessionManager.prototype, "interruptActiveSession", () => {});
   const compaction = t.mock.method(
-    SessionManager.prototype,
-    "compactSession",
+    SessionManager.prototype as unknown as {
+      compactSessionOnce(sessionId: string, signal: AbortSignal, retain: number): Promise<boolean>;
+    },
+    "compactSessionOnce",
     async (id: string, signal?: AbortSignal) => {
       assert.equal(id, entry.id);
       assert.ok(signal);
@@ -136,13 +138,15 @@ test("/compact preserves displayed history, refreshes usage and waits for anothe
   await h.submit();
   assert.equal(h.compaction.mock.callCount(), 1);
   assert.equal(h.prompt.mock.callCount(), 0);
-  assert.match(h.latest(), /Conversation compacted\./);
+  assert.match(h.latest(), /> Conversation compacted\./);
+  assert.equal(h.latest().match(/Conversation compacted\./g)?.length, 1);
+  assert.ok(h.frames.some((frame) => frame.includes("Compacting conversation...")));
   assert.match(h.latest(), /1000\//);
   assert.ok(h.frames.some((frame) => frame.includes("Keep this conversation visible")));
   assert.ok(h.list.mock.callCount() > refreshes);
   await h.submit("Continue working");
   assert.equal(h.prompt.mock.callCount(), 1);
-  assert.doesNotMatch(h.latest(), /Conversation compacted\./);
+  assert.match(h.latest(), /> Conversation compacted\./);
 });
 
 test("/compact reports no active conversation without starting a request", async (t) => {

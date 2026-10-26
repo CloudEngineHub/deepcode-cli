@@ -2087,7 +2087,14 @@ ${agentInstructions}
   }
 
   async compactSession(sessionId: string, signal?: AbortSignal): Promise<boolean> {
-    return await this.compactSessionOnce(sessionId, signal ?? new AbortController().signal, 0);
+    const compactionSignal = signal ?? new AbortController().signal;
+    compactionSignal.throwIfAborted();
+    this.onAssistantMessage(this.buildAssistantMessage(sessionId, "Compacting conversation...", null), false);
+    const changed = await this.compactSessionOnce(sessionId, compactionSignal, 0);
+    if (changed) {
+      this.onAssistantMessage(this.buildUserMessage(sessionId, { text: "Conversation compacted." }), false);
+    }
+    return changed;
   }
 
   /** Commit only a complete, smaller checkpoint against an unchanged selected history. */

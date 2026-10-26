@@ -351,7 +351,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           const session = sessionManager.getSession(sessionId);
           setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
           refreshSessionsList();
-          setCommandNotice(changed ? "Conversation compacted." : "Conversation was not compacted.");
+          if (!changed) setCommandNotice("Conversation was not compacted.");
         } catch (error) {
           if (compactionControllerRef.current !== controller) return;
           if (controller.signal.aborted) {
