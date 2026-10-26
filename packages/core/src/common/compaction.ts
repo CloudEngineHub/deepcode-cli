@@ -65,6 +65,8 @@ export function compactPrefixes(
   const pending = new Set<number>();
   const orphanResults = new Set<number>();
   history.forEach((message, index) => {
+    // Once the conversation resumes, missing earlier results are replayed as interrupted.
+    if (message.role === "user" || message.role === "assistant") pending.clear();
     const params = message.messageParams as { tool_calls?: Array<{ id?: string }>; tool_call_id?: string } | null;
     if (message.role === "assistant") {
       for (const call of params?.tool_calls ?? []) {
@@ -80,7 +82,7 @@ export function compactPrefixes(
       else edges.push([from, index]);
     }
   });
-  // An assistant is only closed when every declared call has a following result.
+  // Without a later conversation message, the trailing batch needs all of its results.
   for (const index of pending) {
     const params = history[index].messageParams as { tool_calls: Array<{ id?: string }> };
     if (

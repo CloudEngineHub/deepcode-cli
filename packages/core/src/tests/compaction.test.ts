@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { SessionManager, type SessionMessage } from "../session";
+import { OpenAIMessageConverter } from "../common/openai-message-converter";
 import { getCompactPrompt, frameCompactSummary } from "../prompt";
 import {
   compactBudget,
@@ -126,7 +127,11 @@ test("prefixes preserve complete parallel tool groups, include old summaries and
     [["summary", "older"], ["summary"]]
   );
   assert.deepEqual(compactPrefixes([message("huge")], [1000000], 0), []);
-  assert.deepEqual(compactPrefixes([call, results[0], message("tail")], [10, 10, 10], 0), []);
+  assert.deepEqual(
+    compactPrefixes([call, results[0], message("tail")], [10, 10, 10], 0).map((prefix) => prefix.map((m) => m.id)),
+    [["call", "a"]]
+  );
+  assert.deepEqual(compactPrefixes([call, results[0]], [10, 10], 0), []);
   const tail = [...history, message("tail")];
   assert.equal(
     compactPrefixes(
@@ -135,6 +140,81 @@ test("prefixes preserve complete parallel tool groups, include old summaries and
       0
     )[0].at(-1)?.id,
     "b"
+  );
+});
+
+test("historical interrupted calls can compact, but unfinished trailing tool batches stay intact", () => {
+  const call = {
+    ...message("call", "assistant"),
+    messageParams: { tool_calls: [{ id: "missing", type: "function", function: { name: "Bash", arguments: "{}" } }] },
+  };
+  const resumed = [call, message("resume", "user", "Continue"), message("work", "assistant"), message("tail")];
+  const selected = compactPrefixes(resumed, [10, 10, 10, 10], 0)[0];
+  assert.deepEqual(
+    selected?.map((m) => m.id),
+    ["call", "resume", "work"]
+  );
+  const replay = new OpenAIMessageConverter().buildMessages(selected, false, "test-model");
+  assert.equal(replay[1].role, "tool");
+  assert.match(String(replay[1].content), /Previous tool call did not complete/);
+  assert.deepEqual(compactPrefixes([call], [10], 0), []);
+
+  const parallel = { ...call, messageParams: { tool_calls: [{ id: "missing" }, { id: "done" }] } };
+  const result = { ...message("result", "tool"), messageParams: { tool_call_id: "done" } };
+  assert.deepEqual(compactPrefixes([parallel, result, message("system", "system")], [10, 10, 10], 0), []);
+});
+
+test("compaction follows the converter's preferred result when a real result replaces an interrupted placeholder", () => {
+  const call = { ...message("call", "assistant"), messageParams: { tool_calls: [{ id: "a" }] } };
+  const placeholder = {
+    ...message("placeholder", "tool", JSON.stringify({ metadata: { interrupted: true } })),
+    messageParams: { tool_call_id: "a" },
+  };
+  const result = { ...message("result", "tool", "real result"), messageParams: { tool_call_id: "a" } };
+  const history = [call, placeholder, message("resume"), result, message("tail")];
+  assert.deepEqual(compactPrefixes(history, [10, 10, 10, 10, 10], 30), []);
+  const selected = compactPrefixes(history, [10, 10, 10, 10, 10], 0)[0];
+  assert.deepEqual(
+    selected.map((m) => m.id),
+    ["call", "placeholder", "resume", "result"]
+  );
+  const replay = new OpenAIMessageConverter().buildMessages(selected, false, "test-model");
+  assert.equal(replay.find((m) => m.role === "tool")?.content, "real result");
+});
+
+test("automatic compaction resumes after an interrupted parallel tool batch", async () => {
+  const call = {
+    ...message("interrupted", "assistant", "old work ".repeat(7000)),
+    messageParams: {
+      tool_calls: ["done", "missing"].map((id) => ({
+        id,
+        type: "function",
+        function: { name: "Bash", arguments: "{}" },
+      })),
+    },
+  };
+  const result = { ...message("result", "tool", "finished result"), messageParams: { tool_call_id: "done" } };
+  const f = fixture([call, result, message("resume", "user", "continue ".repeat(6000))]);
+  f.settings.contextWindow = 100000;
+  const context = await f.internal.prepareContext(f.read(), f.settings.model, true);
+  f.settings.autoCompactWindow =
+    f.internal.measureRequest("compact-test", context.messages, f.settings.model).tokens - 10000;
+  await f.run();
+
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.requests[0].tool_choice, "none");
+  const toolResults = f.requests[0].messages.filter((m: any) => m.role === "tool");
+  assert.equal(toolResults.find((m: any) => m.tool_call_id === "done")?.content, "finished result");
+  assert.match(
+    toolResults.find((m: any) => m.tool_call_id === "missing")?.content,
+    /Previous tool call did not complete/
+  );
+  assert.equal(f.read().find((m) => m.id === "interrupted")?.compacted, true);
+  assert.equal(f.read().find((m) => m.id === "result")?.compacted, true);
+  assert.equal(f.read().find((m) => m.id === "resume")?.compacted, false);
+  assert.equal(
+    f.requests[1].messages.some((m: any) => m.role === "tool"),
+    false
   );
 });
 
