@@ -85,8 +85,10 @@ export {
   findExactSlashCommand,
   formatSlashCommandDescription,
   formatSlashCommandLabel,
+  resolveSlashSubmission,
   type SlashCommandKind,
   type SlashCommandItem,
+  type SlashSubmission,
 } from "./core/slash-commands";
 export {
   filterFileMentionItems,

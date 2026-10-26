@@ -34,7 +34,12 @@ import {
   redoPromptEdit,
   undoPromptEdit,
 } from "../core/prompt-undo-redo";
-import { buildSlashCommands, filterSlashCommands, findExactSlashCommand } from "../core/slash-commands";
+import {
+  buildSlashCommands,
+  filterSlashCommands,
+  findExactSlashCommand,
+  resolveSlashSubmission,
+} from "../core/slash-commands";
 import type { SlashCommandItem } from "../core/slash-commands";
 import {
   filterFileMentionItems,
@@ -759,12 +764,32 @@ export const PromptInput = React.memo(function PromptInput({
       return;
     }
 
-    if (trimmed.startsWith("/")) {
-      const exactMatch = findExactSlashCommand(slashItems, trimmed.split(/\s+/, 1)[0]);
-      if (exactMatch) {
-        handleSlashSelection(exactMatch);
+    const slash = resolveSlashSubmission(slashItems, buffer.text);
+    if (slash) {
+      if (slash.kind === "command") {
+        handleSlashSelection(slash.item);
         return;
       }
+      if (slash.kind === "plan") {
+        onPlanModeChange(true);
+        onSubmit({
+          text: expandPasteMarkers(slash.text, pastesRef.current),
+          imageUrls,
+          selectedSkills,
+          planMode: true,
+        });
+        resetPromptInput();
+        return;
+      }
+      if (slash.kind === "raw") {
+        onRawModeChange?.(slash.mode);
+        resetPromptInput();
+        return;
+      }
+      setStatusMessage(
+        `Unknown ${slash.item.label} argument "${slash.argument}". Expected: ${slash.item.args?.join(", ") ?? "none"}.`
+      );
+      return;
     }
 
     onSubmit({
