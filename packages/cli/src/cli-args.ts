@@ -92,11 +92,6 @@ async function configureYargs(argv?: string[]) {
           default: false,
           describe: "Run one prompt non-interactively (requires --prompt)",
         })
-        .option("resume", {
-          alias: "r",
-          type: "string",
-          describe: "Resume a specific session by its ID. Use without an ID to show session picker.",
-        })
         .option("session-id", {
           type: "string",
           requiresArg: true,
@@ -106,6 +101,11 @@ async function configureYargs(argv?: string[]) {
           type: "boolean",
           default: false,
           describe: "Output a single JSON object instead of human-readable text.",
+        })
+        .option("resume", {
+          alias: "r",
+          type: "string",
+          describe: "Resume a specific session by its ID. Use without an ID to show session picker.",
         })
         .option("fork", {
           alias: "f",
