@@ -58,7 +58,7 @@ import type {
 } from "@vegamo/deepcode-core";
 import { SessionManager } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
-import { createTerminalTitle } from "../../utils/terminal-title";
+import { createTerminalTitle, terminalTitleState } from "../../utils/terminal-title";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -181,7 +181,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const activeSessionId = sessionManager.getActiveSessionId();
   useEffect(() => {
     const entry = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
-    terminalTitle.set(entry?.summary || "Deep Code");
+    terminalTitle.set(entry?.summary || "Deep Code", terminalTitleState(entry?.status));
   }, [activeSessionId, sessionManager, sessions, terminalTitle]);
 
   useEffect(() => () => terminalTitle.clear(), [terminalTitle]);
