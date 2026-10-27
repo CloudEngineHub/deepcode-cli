@@ -6,9 +6,11 @@ import {
   type AskPermissionScope,
   type PermissionSettings,
   type SessionManagerOptions,
+  type SessionMessage,
 } from "@vegamo/deepcode-core";
 import { buildExecPrompt, type ExecInputStream } from "./exec-input";
 import { writeStderrLine, writeStdoutLine } from "./utils/stdio-helpers";
+import { formatSessionMessageJson } from "./session-message-json";
 
 type ExecSessionManager = Pick<
   SessionManager,
@@ -30,6 +32,8 @@ interface SignalTarget {
 export interface ExecRunnerOptions {
   prompt: string;
   projectRoot: string;
+  sessionId?: string;
+  json?: boolean;
   resumeSessionId?: string;
   forkSessionId?: string;
   input?: ExecInputStream;
@@ -61,6 +65,7 @@ export async function runExecMode(
   const deps = { ...defaultDependencies, ...dependencies };
   let manager: ExecSessionManager | null = null;
   let interrupted = false;
+  const result: { message?: SessionMessage } = {};
 
   const handleSigint = (): void => {
     interrupted = true;
@@ -76,7 +81,10 @@ export async function runExecMode(
       getResolvedSettings: () => deps.resolveSettings(options.projectRoot),
       renderMarkdown: (text) => text,
       nonInteractive: true,
-      onAssistantMessage: () => {},
+      onAssistantMessage: (message, shouldConnect) => {
+        // Ignore transient notices and tool messages; retain model responses.
+        if (shouldConnect && message.role === "assistant") result.message = message;
+      },
     });
 
     await manager.initMcpServers(settings.mcpServers);
@@ -108,7 +116,7 @@ export async function runExecMode(
       manager.setActiveSessionId(options.resumeSessionId);
     }
 
-    await manager.handleUserPrompt({ text: prompt });
+    await manager.handleUserPrompt({ text: prompt }, { sessionId: options.sessionId });
     const sessionId = manager.getActiveSessionId();
     const session = sessionId ? manager.getSession(sessionId) : null;
 
@@ -137,7 +145,15 @@ export async function runExecMode(
       return 1;
     }
 
-    deps.writeStdoutLine(session.assistantReply ?? "");
+    if (options.json) {
+      if (!result.message || result.message.sessionId !== sessionId) {
+        deps.writeStderrLine("Execution completed without a final assistant message.");
+        return 1;
+      }
+      deps.writeStdoutLine(formatSessionMessageJson(result.message));
+    } else {
+      deps.writeStdoutLine(session.assistantReply ?? "");
+    }
     return 0;
   } catch (error) {
     if (interrupted) {

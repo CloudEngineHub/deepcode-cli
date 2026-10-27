@@ -10,6 +10,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import { launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
 import { firstMessageTitlePrompt, recentConversationTitlePrompt, generateSessionTitle } from "./common/session-title";
+import { assertSessionIdAvailable, isValidSessionId } from "./common/session-id";
 import { readTextFileWithMetadata } from "./common/file-utils";
 import {
   buildSkillCatalogPrompt,
@@ -1491,13 +1492,13 @@ ${agentInstructions}
     this.onAssistantMessage(message, false);
   }
 
-  async handleUserPrompt(userPrompt: UserPromptContent): Promise<void> {
+  async handleUserPrompt(userPrompt: UserPromptContent, options: { sessionId?: string } = {}): Promise<void> {
     const controller = new AbortController();
     this.activePromptController = controller;
 
     try {
-      if (!this.activeSessionId || !this.getSession(this.activeSessionId)) {
-        await this.createSession(userPrompt, controller);
+      if (options.sessionId !== undefined || !this.activeSessionId || !this.getSession(this.activeSessionId)) {
+        await this.createSession(userPrompt, controller, options.sessionId);
       } else {
         await this.replySession(this.activeSessionId, userPrompt, controller);
       }
@@ -1512,14 +1513,24 @@ ${agentInstructions}
     }
   }
 
-  async createSession(userPrompt: UserPromptContent, controller?: AbortController): Promise<string> {
+  async createSession(
+    userPrompt: UserPromptContent,
+    controller?: AbortController,
+    requestedSessionId?: string
+  ): Promise<string> {
     const signal = controller?.signal;
     this.throwIfAborted(signal);
+    if (requestedSessionId !== undefined && !isValidSessionId(requestedSessionId)) {
+      throw new Error(`Invalid session ID: "${requestedSessionId}". Must be a valid UUID.`);
+    }
+    const sessionId = requestedSessionId?.toLowerCase() ?? crypto.randomUUID();
     await this.createOpenAIClient.prepare?.(signal);
     this.throwIfAborted(signal);
+    if (requestedSessionId !== undefined) {
+      assertSessionIdAvailable(sessionId);
+    }
     this.reportNewPrompt();
 
-    const sessionId = crypto.randomUUID();
     const originalSummary = userPrompt.text ? userPrompt.text.slice(0, 100) : "[Image Prompt]";
     userPrompt = this.preparePromptImages(sessionId, userPrompt);
     this.ensureFileHistorySession(sessionId);

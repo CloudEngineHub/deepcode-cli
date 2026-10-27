@@ -8,22 +8,19 @@ import Yargs from "yargs";
 import { getCliVersion } from "./utils/version";
 import { writeStderrLine } from "./utils/stdio-helpers";
 import { hideBin } from "yargs/helpers";
+import { isValidSessionId } from "@vegamo/deepcode-core";
 
-// UUID v4 regex pattern for validation
-const SESSION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-/**
- * Validates if a string is a valid session ID format.
- */
-export function isValidSessionId(value: string): boolean {
-  return SESSION_ID_REGEX.test(value);
-}
+export { isValidSessionId };
 
 export interface ParsedCliArgs {
   /** Prompt text from -p / --prompt */
   prompt: string | undefined;
   /** Run one prompt without starting the interactive TUI. */
   exec: boolean;
+  /** UUID to use when creating a new session in exec mode. */
+  sessionId: string | undefined;
+  /** Output the final assistant message as a single JSON object. */
+  json: boolean;
   /**
    * Resume session identifier:
    *   - `undefined` — --resume was not used
@@ -100,6 +97,16 @@ async function configureYargs(argv?: string[]) {
           type: "string",
           describe: "Resume a specific session by its ID. Use without an ID to show session picker.",
         })
+        .option("session-id", {
+          type: "string",
+          requiresArg: true,
+          describe: "Adopt the persisted Session with this id",
+        })
+        .option("json", {
+          type: "boolean",
+          default: false,
+          describe: "Output a single JSON object instead of human-readable text.",
+        })
         .option("fork", {
           alias: "f",
           type: "string",
@@ -116,6 +123,18 @@ async function configureYargs(argv?: string[]) {
           const hasPositionalQuery = Array.isArray(query) ? query.length > 0 : !!query;
           const prompt = argv["prompt"] as string | undefined;
           const exec = argv["exec"] === true;
+          const sessionId = argv["session-id"] as string | undefined;
+
+          if (sessionId !== undefined) {
+            if (!exec) return "--session-id requires --exec / -x.";
+            if (argv["resume"] !== undefined || argv["fork"] !== undefined || argv["last"] === true) {
+              return "Cannot use --session-id together with --resume, --fork, or --last.";
+            }
+            if (!isValidSessionId(sessionId)) {
+              return `Invalid session ID: "${sessionId}". Must be a valid UUID.`;
+            }
+          }
+          if (argv["json"] === true && !exec) return "--json requires --exec / -x.";
 
           if (prompt && hasPositionalQuery) {
             return "Cannot use both a positional prompt and the --prompt (-p) flag together";
@@ -212,6 +231,8 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
   return {
     prompt: parsed.prompt as string | undefined,
     exec: parsed.exec === true,
+    sessionId: (parsed["session-id"] as string | undefined)?.toLowerCase(),
+    json: parsed.json === true,
     resume,
     fork,
     version: parsed.version === true,

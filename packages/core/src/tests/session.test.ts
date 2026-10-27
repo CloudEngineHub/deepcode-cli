@@ -441,6 +441,117 @@ test("SessionManager keeps usagePerModel null until response usage is available"
   assert.equal(manager.getSession(sessionId)?.usagePerModel, null);
 });
 
+test("handleUserPrompt persists a requested session ID in lowercase and rejects reuse", async (t) => {
+  const workspace = createTempDir("deepcode-custom-session-workspace-");
+  const home = createTempDir("deepcode-custom-session-home-");
+  setHomeDir(home);
+  const requestedId = "0A5CB7A5-C39D-4C39-A11B-05F8B22B8DF6";
+  const sessionId = requestedId.toLowerCase();
+  const manager = createMockedClientSessionManager(workspace, [{ choices: [{ message: { content: "done" } }] }]);
+  t.after(() => manager.dispose());
+
+  await manager.handleUserPrompt({ text: "task" }, { sessionId: requestedId });
+
+  assert.equal(manager.getActiveSessionId(), sessionId);
+  assert.equal(manager.getSession(sessionId)?.status, "completed");
+  const messages = manager.listSessionMessages(sessionId);
+  assert.ok(messages.length > 0);
+  assert.ok(messages.every((message) => message.sessionId === sessionId));
+  assert.equal(messages.at(-1)?.content, "done");
+  const projectDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace));
+  const indexBefore = fs.readFileSync(path.join(projectDir, "sessions-index.json"), "utf8");
+  const messagesBefore = fs.readFileSync(path.join(projectDir, `${sessionId}.jsonl`), "utf8");
+
+  await assert.rejects(manager.handleUserPrompt({ text: "overwrite" }, { sessionId }), /already in use/);
+  assert.equal(fs.readFileSync(path.join(projectDir, "sessions-index.json"), "utf8"), indexBefore);
+  assert.equal(fs.readFileSync(path.join(projectDir, `${sessionId}.jsonl`), "utf8"), messagesBefore);
+});
+
+for (const source of ["same-project-index", "other-project-index", "other-project-messages"] as const) {
+  test(`createSession rejects a case-insensitive duplicate from ${source} before writing`, async (t) => {
+    const workspace = createTempDir("deepcode-duplicate-session-workspace-");
+    const home = createTempDir("deepcode-duplicate-session-home-");
+    setHomeDir(home);
+    const sessionId = "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6";
+    const projectsDir = path.join(home, ".deepcode", "projects");
+    const projectDir = path.join(projectsDir, getProjectCode(workspace));
+    const existingDir = source === "same-project-index" ? projectDir : path.join(projectsDir, "other-project");
+    fs.mkdirSync(existingDir, { recursive: true });
+    const filename = source === "other-project-messages" ? `${sessionId.toUpperCase()}.jsonl` : "sessions-index.json";
+    const contents =
+      source === "other-project-messages"
+        ? "existing messages\n"
+        : JSON.stringify({ entries: [{ id: sessionId.toUpperCase() }] });
+    const existingPath = path.join(existingDir, filename);
+    fs.writeFileSync(existingPath, contents);
+    const manager = createSessionManager(workspace, "machine-id-duplicate");
+    t.after(() => manager.dispose());
+
+    await assert.rejects(manager.createSession({ text: "task" }, undefined, sessionId), /already in use/);
+
+    assert.equal(fs.readFileSync(existingPath, "utf8"), contents);
+    assert.deepEqual(fs.readdirSync(existingDir), [filename]);
+    if (existingDir !== projectDir) assert.equal(fs.existsSync(projectDir), false);
+    assert.equal(manager.getActiveSessionId(), null);
+  });
+}
+
+for (const contents of ["{", "{}", '{"entries":[{}]}']) {
+  test(`createSession refuses a custom ID when another project's index is invalid: ${contents}`, async (t) => {
+    const workspace = createTempDir("deepcode-invalid-index-workspace-");
+    const home = createTempDir("deepcode-invalid-index-home-");
+    setHomeDir(home);
+    const projectsDir = path.join(home, ".deepcode", "projects");
+    const existingDir = path.join(projectsDir, "other-project");
+    fs.mkdirSync(existingDir, { recursive: true });
+    const indexPath = path.join(existingDir, "sessions-index.json");
+    fs.writeFileSync(indexPath, contents);
+    const manager = createSessionManager(workspace, "machine-id-invalid-index");
+    t.after(() => manager.dispose());
+
+    await assert.rejects(
+      manager.createSession({ text: "task" }, undefined, "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6"),
+      /Unable to verify session ID availability/
+    );
+    assert.equal(fs.readFileSync(indexPath, "utf8"), contents);
+    assert.equal(fs.existsSync(path.join(projectsDir, getProjectCode(workspace))), false);
+  });
+}
+
+test("createSession rejects invalid explicit IDs without creating storage", async (t) => {
+  const workspace = createTempDir("deepcode-invalid-id-workspace-");
+  const home = createTempDir("deepcode-invalid-id-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-invalid-id");
+  t.after(() => manager.dispose());
+  for (const id of ["", "../outside", "not-a-uuid"]) {
+    await assert.rejects(manager.createSession({ text: "task" }, undefined, id), /Must be a valid UUID/);
+  }
+  assert.equal(fs.existsSync(path.join(home, ".deepcode", "projects")), false);
+});
+
+test("createSession allows reusing a fully deleted custom ID", async (t) => {
+  const workspace = createTempDir("deepcode-reuse-id-workspace-");
+  const home = createTempDir("deepcode-reuse-id-home-");
+  setHomeDir(home);
+  const sessionId = "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6";
+  const manager = createMockedClientSessionManager(workspace, [
+    { choices: [{ message: { content: "first" } }] },
+    { choices: [{ message: { content: "second" } }] },
+  ]);
+  t.after(() => manager.dispose());
+
+  await manager.handleUserPrompt({ text: "task" }, { sessionId });
+  assert.equal(manager.deleteSession(sessionId), true);
+  await manager.handleUserPrompt({ text: "new task" }, { sessionId });
+  assert.equal(manager.getActiveSessionId(), sessionId);
+  assert.equal(manager.getSession(sessionId)?.assistantReply, "second");
+  assert.equal(
+    manager.listSessionMessages(sessionId).some((message) => message.content === "first"),
+    false
+  );
+});
+
 test("SessionManager marks skills loaded from existing session messages", async () => {
   const workspace = createTempDir("deepcode-loaded-skills-workspace-");
   const home = createTempDir("deepcode-loaded-skills-home-");

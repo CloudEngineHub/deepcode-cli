@@ -5,6 +5,7 @@ import type {
   ResolvedDeepcodingSettings,
   SessionEntry,
   SessionManagerOptions,
+  SessionMessage,
   SessionStatus,
   UserPromptContent,
 } from "@vegamo/deepcode-core";
@@ -84,6 +85,7 @@ function pipedInput(content: string): ExecInputStream {
 type ManagerScenario = {
   finalStatus?: SessionStatus;
   finalReply?: string | null;
+  finalMessageParams?: unknown;
   failReason?: string | null;
   resumeExists?: boolean;
   throwFromPrompt?: Error;
@@ -127,10 +129,10 @@ function createHarness(scenario: ManagerScenario = {}) {
           entry = createEntry(activeId, "completed");
           return activeId;
         },
-        handleUserPrompt: async (prompt) => {
+        handleUserPrompt: async (prompt, promptOptions) => {
           submitted.push(prompt);
           if (scenario.throwFromPrompt) throw scenario.throwFromPrompt;
-          activeId ??= "new-session";
+          activeId ??= promptOptions?.sessionId ?? "new-session";
           options.onSessionEntryUpdated?.(createEntry(activeId, "processing"));
           options.onAssistantMessage(
             {
@@ -154,6 +156,21 @@ function createHarness(scenario: ManagerScenario = {}) {
             failReason: scenario.failReason ?? null,
             askPermissions: scenario.askPermissions,
           });
+          const finalMessage: SessionMessage = {
+            id: "final-message",
+            sessionId: activeId,
+            role: "assistant",
+            content: entry.assistantReply,
+            contentParams: null,
+            messageParams: scenario.finalMessageParams ?? null,
+            compacted: false,
+            visible: Boolean(entry.assistantReply),
+            createTime: entry.createTime,
+            updateTime: entry.updateTime,
+          };
+          options.onAssistantMessage(finalMessage, true);
+          options.onAssistantMessage({ ...finalMessage, id: "notice", content: "diagnostic" }, false);
+          options.onAssistantMessage({ ...finalMessage, id: "tool", role: "tool", content: "tool output" }, true);
           options.onSessionEntryUpdated?.(entry);
         },
         initMcpServers: async (servers) => {
@@ -222,6 +239,76 @@ test("runExecMode submits piped stdin in the persisted user prompt", async () =>
   assert.equal(code, 0);
   assert.deepEqual(harness.submitted, [{ text: "explain\n\n<stdin>\ndetails\n</stdin>" }]);
   assert.deepEqual(harness.stderr, []);
+});
+
+for (const sessionOptions of [
+  { sessionId: RESUME_ID },
+  { resumeSessionId: RESUME_ID },
+  { forkSessionId: RESUME_ID },
+  {},
+]) {
+  test(`runExecMode outputs only the final message as JSON with ${JSON.stringify(sessionOptions)}`, async () => {
+    const harness = createHarness({ resumeExists: true, finalMessageParams: { reasoning_content: "thoughts" } });
+    const code = await runExecMode(
+      { prompt: "task", projectRoot: "/tmp/project", input: ttyInput(), json: true, ...sessionOptions },
+      harness.dependencies
+    );
+    assert.equal(code, 0);
+    assert.equal(harness.stdout.length, 1);
+    assert.deepEqual(JSON.parse(harness.stdout[0]), {
+      id: "final-message",
+      sessionId: sessionOptions.forkSessionId
+        ? "forked-session"
+        : (sessionOptions.sessionId ?? sessionOptions.resumeSessionId ?? "new-session"),
+      role: "assistant",
+      content: "final answer",
+      messageParams: { reasoning_content: "thoughts" },
+      compacted: false,
+      visible: true,
+      createTime: "2026-01-01T00:00:00.000Z",
+      updateTime: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepEqual(harness.stderr, []);
+    assert.equal(harness.disposed, 1);
+  });
+}
+
+test("runExecMode outputs JSON even when the final message has no text", async () => {
+  const harness = createHarness({ finalReply: null });
+  const code = await runExecMode(
+    { prompt: "task", projectRoot: "/tmp/project", input: ttyInput(), json: true },
+    harness.dependencies
+  );
+  assert.equal(code, 0);
+  const message = JSON.parse(harness.stdout[0]);
+  assert.equal(message.id, "final-message");
+  assert.equal(message.visible, false);
+  assert.equal("content" in message, false);
+});
+
+for (const finalStatus of ["failed", "ask_permission", "waiting_for_user", "interrupted"] as const) {
+  test(`runExecMode keeps stderr diagnostics and exit status in JSON mode for ${finalStatus}`, async () => {
+    const harness = createHarness({ finalStatus });
+    const code = await runExecMode(
+      { prompt: "task", projectRoot: "/tmp/project", input: ttyInput(), json: true },
+      harness.dependencies
+    );
+    assert.equal(code, 1);
+    assert.deepEqual(harness.stdout, []);
+    assert.equal(harness.stderr.length, 1);
+    assert.equal(harness.disposed, 1);
+  });
+}
+
+test("runExecMode keeps stdout empty on SIGINT in JSON mode", async () => {
+  const harness = createHarness({ duringPrompt: () => harness.emitSigint() });
+  const code = await runExecMode(
+    { prompt: "task", projectRoot: "/tmp/project", input: ttyInput(), json: true },
+    harness.dependencies
+  );
+  assert.equal(code, 130);
+  assert.deepEqual(harness.stdout, []);
+  assert.equal(harness.disposed, 1);
 });
 
 test("runExecMode resumes a validated session before submitting", async () => {

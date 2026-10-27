@@ -74,6 +74,8 @@ async function main(): Promise<void> {
     process.exitCode = await runExecMode({
       prompt: parsed.prompt!,
       projectRoot,
+      sessionId: parsed.sessionId,
+      json: parsed.json,
       resumeSessionId: typeof resumeSessionId === "string" ? resumeSessionId : undefined,
       forkSessionId: typeof forkSessionId === "string" ? forkSessionId : undefined,
     });

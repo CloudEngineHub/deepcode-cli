@@ -21,7 +21,63 @@ test("parseArguments returns prompt after -p", async () => {
   assert.ok(!("message" in r));
   assert.equal(r.prompt, "hello world");
   assert.equal(r.exec, false);
+  assert.equal(r.sessionId, undefined);
+  assert.equal(r.json, false);
 });
+
+test("parseArguments accepts a custom UUID and JSON output in exec mode", async () => {
+  const id = "0A5CB7A5-C39D-4C39-A11B-05F8B22B8DF6";
+  const parsed = await parseArguments(["--exec", "--prompt", "hello", "--session-id", id, "--json"]);
+  assert.equal(parsed.sessionId, id.toLowerCase());
+  assert.equal(parsed.json, true);
+});
+
+test("isValidSessionId accepts standard UUID versions and rejects invalid variants", () => {
+  for (let version = 1; version <= 8; version++) {
+    assert.ok(isValidSessionId(`0a5cb7a5-c39d-${version}c39-a11b-05f8b22b8df6`));
+  }
+  assert.ok(isValidSessionId("00000000-0000-0000-0000-000000000000"));
+  assert.ok(isValidSessionId("ffffffff-ffff-ffff-ffff-ffffffffffff"));
+  assert.ok(!isValidSessionId("0a5cb7a5-c39d-4c39-711b-05f8b22b8df6"));
+  assert.ok(!isValidSessionId("0a5cb7a5-c39d-9c39-a11b-05f8b22b8df6"));
+});
+
+for (const flags of [
+  ["--resume", "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6"],
+  ["--fork", "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6"],
+  ["--fork"],
+  ["--last"],
+]) {
+  test(`parseArguments accepts --json with exec and ${flags.join(" ")}`, async () => {
+    const parsed = await parseArguments(["-x", "-p", "hello", "--json", ...flags]);
+    assert.equal(parsed.json, true);
+  });
+}
+
+for (const args of [
+  ["--session-id", "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6"],
+  ["--json"],
+  ["-x", "-p", "hello", "--session-id"],
+  ["-x", "-p", "hello", "--session-id", ""],
+  ["-x", "-p", "hello", "--session-id", "not-a-uuid"],
+  ["-x", "--json"],
+  ["-x", "--session-id", "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6"],
+  ...["-r", "--resume", "-f", "--fork", "-l", "--last"].map((flag) => [
+    "-x",
+    "-p",
+    "hello",
+    "--session-id",
+    "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6",
+    flag,
+  ]),
+]) {
+  test(`parseArguments rejects ${args.join(" ")}`, async () => {
+    await withMockedExit(async (exitSpy) => {
+      await assert.rejects(parseArguments(args), /process.exit\(1\)/);
+      assert.ok(exitSpy.calls.includes(1));
+    });
+  });
+}
 
 test("parseArguments enables exec mode with -x", async () => {
   const r = await parseArguments(["-x", "-p", "hello world"]);
