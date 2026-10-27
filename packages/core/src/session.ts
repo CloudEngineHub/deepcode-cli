@@ -30,7 +30,6 @@ import {
   type ProcessTimeoutInfo,
   type PluginRateLimitedTool,
   type SharpLoader,
-  type ToolCallExecution,
   type ToolExecutionHooks,
   type ToolExecutionFollowUpMessage,
   type ToolExecutionResult,
@@ -267,6 +266,8 @@ export type ModelUsage = {
 };
 
 export type SessionProcessEntry = {
+  toolCallId?: string;
+  runInBackground?: boolean;
   startTime: string;
   command: string;
   timeoutMs?: number;
@@ -2475,7 +2476,7 @@ ${agentInstructions}
     }));
   }
 
-  adjustActiveBashTimeout(deltaMs: number): BashTimeoutAdjustment | null {
+  adjustActiveBashTimeout(deltaMs: number, processId?: string): BashTimeoutAdjustment | null {
     const sessionId = this.activeSessionId;
     if (!sessionId || !Number.isFinite(deltaMs)) {
       return null;
@@ -2487,6 +2488,7 @@ ${agentInstructions}
 
     let selectedPid: string | null = null;
     for (const pid of session.processes.keys()) {
+      if (processId !== undefined && pid !== processId) continue;
       if (this.processTimeoutControls.has(this.getProcessControlKey(sessionId, pid))) {
         selectedPid = pid;
       }
@@ -3384,7 +3386,6 @@ ${agentInstructions}
     const loadedSkillNames = new Set<string>();
     const hooks: ToolExecutionHooks = {
       signal: this.sessionControllers.get(sessionId)?.signal,
-      onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
@@ -3398,41 +3399,35 @@ ${agentInstructions}
     const parsedToolCalls = toolCalls
       .map((toolCall) => parseToolCallForPermissions(toolCall))
       .filter((toolCall): toolCall is PermissionToolCall => Boolean(toolCall));
-    const toolExecutions: ToolCallExecution[] = [];
-    for (const toolCall of parsedToolCalls) {
-      if (hooks.shouldStop?.()) {
-        break;
-      }
-      const blockedResult = buildPermissionToolExecution(toolCall, options);
-      if (blockedResult) {
-        toolExecutions.push(blockedResult);
-        continue;
-      }
-      const executions = await this.toolExecutor.executeToolCalls(sessionId, [toolCall], hooks);
-      toolExecutions.push(...executions);
-    }
-    if (this.isInterrupted(sessionId)) {
-      return { waitingForUser: false };
-    }
     let waitingForUser = false;
     const followUpMessages: SessionMessage[] = [];
-    for (const execution of toolExecutions) {
-      if (execution.result.awaitUserResponse === true) {
-        waitingForUser = true;
-      }
-      const toolFunction = this.messageConverter.findToolFunction(toolCalls, execution.toolCallId);
-      const toolMessage = this.buildToolMessage(
-        sessionId,
-        execution.toolCallId,
-        execution.content,
-        toolFunction,
-        execution.result.name === "skill" ? execution.result.metadata : undefined
-      );
-      this.appendSessionMessage(sessionId, toolMessage);
-      this.onAssistantMessage(toolMessage, true);
+    for (const toolCall of parsedToolCalls) {
+      if (hooks.shouldStop?.()) break;
+      const blockedResult = buildPermissionToolExecution(toolCall, options);
+      const executions = blockedResult
+        ? [blockedResult]
+        : await this.toolExecutor.executeToolCalls(sessionId, [toolCall], {
+            ...hooks,
+            onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command, toolCall),
+          });
+      if (this.isInterrupted(sessionId)) return { waitingForUser: false };
 
-      for (const followUpMessage of execution.result.followUpMessages ?? []) {
-        followUpMessages.push(this.buildFollowUpMessage(sessionId, followUpMessage));
+      // Publish each result before starting the next command so Process Output can retain it.
+      for (const execution of executions) {
+        if (execution.result.awaitUserResponse === true) waitingForUser = true;
+        const toolFunction = this.messageConverter.findToolFunction(toolCalls, execution.toolCallId);
+        const toolMessage = this.buildToolMessage(
+          sessionId,
+          execution.toolCallId,
+          execution.content,
+          toolFunction,
+          execution.result.name === "skill" ? execution.result.metadata : undefined
+        );
+        this.appendSessionMessage(sessionId, toolMessage);
+        this.onAssistantMessage(toolMessage, true);
+        for (const followUpMessage of execution.result.followUpMessages ?? []) {
+          followUpMessages.push(this.buildFollowUpMessage(sessionId, followUpMessage));
+        }
       }
     }
 
@@ -3643,12 +3638,23 @@ ${agentInstructions}
     });
   }
 
-  private addSessionProcess(sessionId: string, processId: string | number, command: string): void {
+  private addSessionProcess(
+    sessionId: string,
+    processId: string | number,
+    command: string,
+    toolCall?: PermissionToolCall
+  ): void {
+    const args = toolCall ? JSON.parse(toolCall.function.arguments) : {};
     const now = new Date().toISOString();
     this.liveProcessKeys.add(this.getProcessControlKey(sessionId, processId));
     this.updateSessionEntry(sessionId, (entry) => {
       const processes = new Map(entry.processes ?? []);
-      processes.set(String(processId), { startTime: now, command });
+      processes.set(String(processId), {
+        startTime: now,
+        command,
+        toolCallId: toolCall?.id,
+        runInBackground: args.run_in_background === true || args.run_in_background === "true",
+      });
       return {
         ...entry,
         processes,
@@ -3950,6 +3956,8 @@ ${agentInstructions}
         const obj = entry as {
           startTime?: unknown;
           command?: unknown;
+          toolCallId?: unknown;
+          runInBackground?: unknown;
           timeoutMs?: unknown;
           deadlineAt?: unknown;
           timedOut?: unknown;
@@ -3959,6 +3967,8 @@ ${agentInstructions}
         processes.set(pid, {
           startTime,
           command,
+          toolCallId: typeof obj.toolCallId === "string" ? obj.toolCallId : undefined,
+          runInBackground: typeof obj.runInBackground === "boolean" ? obj.runInBackground : undefined,
           timeoutMs: typeof obj.timeoutMs === "number" ? obj.timeoutMs : undefined,
           deadlineAt: typeof obj.deadlineAt === "string" ? obj.deadlineAt : undefined,
           timedOut: typeof obj.timedOut === "boolean" ? obj.timedOut : undefined,
