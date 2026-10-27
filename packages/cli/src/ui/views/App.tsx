@@ -14,6 +14,7 @@ import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 import { McpStatusList } from "./McpStatusList";
+import { buildProcessOutputItems } from "../core/process-output";
 import { ProcessStdoutView } from "./ProcessStdoutView";
 import {
   type AskUserQuestionAnswers,
@@ -179,6 +180,17 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   }, [projectRoot, clientFactory]);
 
   const activeSessionId = sessionManager.getActiveSessionId();
+  useEffect(() => {
+    processStdoutRef.current.clear();
+  }, [activeSessionId]);
+  const processOutputItems = useMemo(
+    () =>
+      buildProcessOutputItems(
+        showProcessStdout && activeSessionId ? sessionManager.listSessionMessages(activeSessionId) : messages,
+        runningProcesses
+      ),
+    [showProcessStdout, activeSessionId, sessionManager, messages, runningProcesses]
+  );
   useEffect(() => {
     const entry = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
     terminalTitle.set(entry?.summary || "Deep Code", terminalTitleState(entry?.status));
@@ -551,7 +563,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   }, []);
 
   const handleAdjustBashTimeout = useCallback(
-    (deltaMs: number) => sessionManager.adjustActiveBashTimeout(deltaMs),
+    (deltaMs: number, processId: string) => sessionManager.adjustActiveBashTimeout(deltaMs, processId),
     [sessionManager]
   );
 
@@ -1086,8 +1098,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       ) : null}
       {showProcessStdout ? (
         <ProcessStdoutView
+          key={activeSessionId}
+          items={processOutputItems}
           processStdoutRef={processStdoutRef}
-          runningProcesses={runningProcesses}
           onDismiss={handleDismissProcessStdout}
           onAdjustTimeout={handleAdjustBashTimeout}
           screenWidth={screenWidth}
@@ -1156,7 +1169,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           busy={busy}
           cursorLayoutKey={promptCursorLayoutKey}
           loadingText={loadingText}
-          runningProcesses={runningProcesses}
           promptDraft={promptDraft}
           onPromptDraftApplied={handlePromptDraftApplied}
           onSubmit={handleSubmit}

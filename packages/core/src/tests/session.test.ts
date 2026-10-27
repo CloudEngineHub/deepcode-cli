@@ -4057,6 +4057,44 @@ rl.on("line", (line) => {
   manager.dispose();
 });
 
+test("SessionManager publishes each tool result before starting the next tool", async () => {
+  const workspace = createTempDir("deepcode-process-history-");
+  setHomeDir(createTempDir("deepcode-process-history-home-"));
+  const manager = createSessionManager(workspace, "");
+  const sessionId = await manager.createSession({ text: "hello" });
+  const calls = ["first", "second"].map((id) => ({
+    id,
+    type: "function",
+    function: {
+      name: "bash",
+      arguments: JSON.stringify({ command: "echo hello", run_in_background: id === "second" }),
+    },
+  }));
+  const internals = manager as any;
+  internals.sessionControllers.set(sessionId, new AbortController());
+  let count = 0;
+  internals.toolExecutor.executeToolCalls = async (_sessionId: string, batch: typeof calls, hooks: any) => {
+    const call = batch[0]!;
+    if (count++ > 0) {
+      assert.ok(
+        manager
+          .listSessionMessages(sessionId)
+          .some((message) => (message.messageParams as { tool_call_id?: string })?.tool_call_id === "first")
+      );
+    }
+    hooks.onProcessStart(123, "echo hello");
+    const process = manager.getSession(sessionId)?.processes?.get("123");
+    assert.equal(process?.toolCallId, call.id);
+    assert.equal(process?.runInBackground, call.id === "second");
+    hooks.onProcessExit(123);
+    const result = { ok: true, name: "bash", output: "hello", metadata: { exitCode: 0 } };
+    return [{ toolCallId: call.id, result, content: JSON.stringify(result) }];
+  };
+  await internals.appendToolMessages(sessionId, calls);
+  assert.equal(count, 2);
+  manager.dispose();
+});
+
 test("SessionManager adjusts the active Bash timeout control and session metadata", async () => {
   const workspace = createTempDir("deepcode-bash-timeout-session-");
   const home = createTempDir("deepcode-bash-timeout-home-");
@@ -4085,7 +4123,8 @@ test("SessionManager adjusts the active Bash timeout control and session metadat
     },
   });
 
-  const adjustment = manager.adjustActiveBashTimeout(5 * 60 * 1000);
+  assert.equal(manager.adjustActiveBashTimeout(5 * 60 * 1000, "missing"), null);
+  const adjustment = manager.adjustActiveBashTimeout(5 * 60 * 1000, "123");
   const processInfo = manager.getSession(sessionId)?.processes?.get("123");
 
   assert.equal(adjustment?.processId, "123");

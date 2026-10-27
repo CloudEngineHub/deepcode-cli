@@ -67,7 +67,7 @@ import {
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import type { ModelConfigSelection, PermissionScope } from "@vegamo/deepcode-core";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
-import type { SessionEntry, SkillInfo } from "@vegamo/deepcode-core";
+import type { SkillInfo } from "@vegamo/deepcode-core";
 import type { UserToolPermission } from "@vegamo/deepcode-core";
 import type { StatusSegment } from "../statusline";
 
@@ -99,7 +99,6 @@ type Props = {
   loadingText?: string | null;
   disabled?: boolean;
   placeholder?: string;
-  runningProcesses?: SessionEntry["processes"];
   promptDraft?: PromptDraft | null;
   statusLineSegments?: StatusSegment[];
   statusLineSeparator?: string;
@@ -135,7 +134,6 @@ export const PromptInput = React.memo(function PromptInput({
   loadingText,
   disabled,
   placeholder,
-  runningProcesses,
   promptDraft,
   statusLineSegments,
   statusLineSeparator,
@@ -204,8 +202,7 @@ export const PromptInput = React.memo(function PromptInput({
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
-  const hasRunningProcess = runningProcesses && runningProcesses.size > 0;
-  const processOrPasteHint = hasRunningProcess
+  const processOrPasteHint = isEmpty(buffer)
     ? " · ctrl+o view output"
     : hasCollapsedMarkers
       ? " · ctrl+o expand"
@@ -358,7 +355,7 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.ctrl && (input === "o" || input === "O")) {
-        if (runningProcesses && runningProcesses.size > 0 && onToggleProcessStdout) {
+        if (isEmpty(buffer) && onToggleProcessStdout) {
           onToggleProcessStdout();
         } else {
           expandPasteMarkerAtCursor();
