@@ -1,5 +1,5 @@
 import type { SessionEntry, SessionMessage } from "@vegamo/deepcode-core";
-import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 
 export type ProcessOutputItem = {
   id: string;
@@ -62,26 +62,13 @@ export function formatProcessOutputTitle(item: ProcessOutputItem): string {
     : `── (return ${item.exitCode ?? "unknown"}) [${command}] ──`;
 }
 
+/** Wrap into physical rows, expanding tabs and preserving ANSI styles across rows. */
+export function wrapProcessOutputLines(text: string, width: number): string[] {
+  return wrapAnsi(text, Math.max(1, width), { hard: true, wordWrap: false, trim: false }).split("\n");
+}
+
 export function wrapProcessOutputTitle(item: ProcessOutputItem, width: number): string[] {
-  const columns = Math.max(1, width);
-  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  const lines: string[] = [];
-  for (const line of formatProcessOutputTitle(item).split("\n")) {
-    let current = "";
-    let currentWidth = 0;
-    for (const { segment } of segmenter.segment(line)) {
-      const segmentWidth = stringWidth(segment);
-      if (current && currentWidth + segmentWidth > columns) {
-        lines.push(current);
-        current = "";
-        currentWidth = 0;
-      }
-      current += segment;
-      currentWidth += segmentWidth;
-    }
-    lines.push(current);
-  }
-  return lines;
+  return wrapProcessOutputLines(formatProcessOutputTitle(item), width);
 }
 
 export function moveProcessOutputSelection(

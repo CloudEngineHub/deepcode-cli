@@ -4,7 +4,12 @@ import { BASH_TIMEOUT_DECREMENT_MS, BASH_TIMEOUT_INCREMENT_MS } from "@vegamo/de
 import type { BashTimeoutAdjustment } from "@vegamo/deepcode-core";
 import { useTerminalInput } from "../hooks";
 
-import { wrapProcessOutputTitle, moveProcessOutputSelection, type ProcessOutputItem } from "../core/process-output";
+import {
+  wrapProcessOutputTitle,
+  moveProcessOutputSelection,
+  wrapProcessOutputLines,
+  type ProcessOutputItem,
+} from "../core/process-output";
 
 type ProcessStdoutViewProps = {
   processStdoutRef: React.RefObject<Map<number, string>>;
@@ -78,8 +83,8 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   }, []);
 
   const lines = useMemo(
-    () => [...(pinTitle ? [] : titleLines), ...(selected ? stdoutText.split("\n") : [])],
-    [pinTitle, titleLines, selected, stdoutText]
+    () => [...(pinTitle ? [] : titleLines), ...(selected ? wrapProcessOutputLines(stdoutText, screenWidth - 2) : [])],
+    [pinTitle, titleLines, selected, stdoutText, screenWidth]
   );
   const canAdjustTimeout = selected?.running && !selected.background && typeof selected.timeoutMs === "number";
   const showScrollHint = lines.length > visibleLineLimit && visibleLineLimit > 1;
