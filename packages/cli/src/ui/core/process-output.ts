@@ -1,4 +1,5 @@
 import type { SessionEntry, SessionMessage } from "@vegamo/deepcode-core";
+import stringWidth from "string-width";
 
 export type ProcessOutputItem = {
   id: string;
@@ -55,10 +56,32 @@ export function buildProcessOutputItems(
 }
 
 export function formatProcessOutputTitle(item: ProcessOutputItem): string {
-  const command = item.command.replace(/[\r\n]+/g, " ");
+  const command = item.command.replace(/\r\n?/g, "\n");
   return item.running
     ? `── Process ${item.pid} ${item.background ? "(background) " : ""}[${command}] ──`
     : `── (return ${item.exitCode ?? "unknown"}) [${command}] ──`;
+}
+
+export function wrapProcessOutputTitle(item: ProcessOutputItem, width: number): string[] {
+  const columns = Math.max(1, width);
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const lines: string[] = [];
+  for (const line of formatProcessOutputTitle(item).split("\n")) {
+    let current = "";
+    let currentWidth = 0;
+    for (const { segment } of segmenter.segment(line)) {
+      const segmentWidth = stringWidth(segment);
+      if (current && currentWidth + segmentWidth > columns) {
+        lines.push(current);
+        current = "";
+        currentWidth = 0;
+      }
+      current += segment;
+      currentWidth += segmentWidth;
+    }
+    lines.push(current);
+  }
+  return lines;
 }
 
 export function moveProcessOutputSelection(

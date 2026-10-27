@@ -4,7 +4,7 @@ import { BASH_TIMEOUT_DECREMENT_MS, BASH_TIMEOUT_INCREMENT_MS } from "@vegamo/de
 import type { BashTimeoutAdjustment } from "@vegamo/deepcode-core";
 import { useTerminalInput } from "../hooks";
 
-import { formatProcessOutputTitle, moveProcessOutputSelection, type ProcessOutputItem } from "../core/process-output";
+import { wrapProcessOutputTitle, moveProcessOutputSelection, type ProcessOutputItem } from "../core/process-output";
 
 type ProcessStdoutViewProps = {
   processStdoutRef: React.RefObject<Map<number, string>>;
@@ -38,8 +38,14 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(screenHeight - 1, MAX_PANEL_HEIGHT));
-  const reservedRows = statusMessage ? 4 : 3;
-  const visibleLineLimit = Math.max(1, panelHeight - reservedRows);
+  const titleLines = useMemo(
+    () => (selected ? wrapProcessOutputTitle(selected, screenWidth - 2) : ["(no process output)"]),
+    [selected, screenWidth]
+  );
+  const contentRows = Math.max(1, panelHeight - (statusMessage ? 3 : 2));
+  // Keep ordinary commands visible; include very long commands in the scrollable content.
+  const pinTitle = titleLines.length <= contentRows - 2;
+  const visibleLineLimit = contentRows - (pinTitle ? titleLines.length : 0);
 
   const currentId = selected?.id;
   useEffect(() => {
@@ -71,21 +77,23 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
     };
   }, []);
 
-  const lines = useMemo(() => stdoutText.split("\n"), [stdoutText]);
+  const lines = useMemo(
+    () => [...(pinTitle ? [] : titleLines), ...(selected ? stdoutText.split("\n") : [])],
+    [pinTitle, titleLines, selected, stdoutText]
+  );
   const canAdjustTimeout = selected?.running && !selected.background && typeof selected.timeoutMs === "number";
+  const showScrollHint = lines.length > visibleLineLimit && visibleLineLimit > 1;
+  const outputLineLimit = visibleLineLimit - (showScrollHint ? 1 : 0);
+  const maxScrollOffset = Math.max(0, lines.length - outputLineLimit);
 
   const visibleLines = useMemo(() => {
-    if (lines.length <= visibleLineLimit) {
-      return lines;
-    }
-    const outputLineLimit = Math.max(1, visibleLineLimit - 1);
-    const start = Math.max(0, lines.length - outputLineLimit - scrollOffset);
+    const start = Math.max(0, maxScrollOffset - scrollOffset);
     const slice = lines.slice(start, start + outputLineLimit);
-    if (lines.length > visibleLineLimit) {
+    if (showScrollHint) {
       slice.unshift(`... (${start} lines above · ↑/↓ to scroll · ${lines.length} total lines) ...`);
     }
     return slice;
-  }, [lines, scrollOffset, visibleLineLimit]);
+  }, [lines, scrollOffset, outputLineLimit, maxScrollOffset, showScrollHint]);
 
   const setTemporaryStatus = (message: string) => {
     setStatusMessage(message);
@@ -116,19 +124,19 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
         return;
       }
       if (key.upArrow) {
-        setScrollOffset((s) => Math.min(s + 10, Math.max(0, lines.length - visibleLineLimit)));
+        setScrollOffset((s) => Math.min(s + Math.min(10, outputLineLimit), maxScrollOffset));
         return;
       }
       if (key.downArrow) {
-        setScrollOffset((s) => Math.max(s - 10, 0));
+        setScrollOffset((s) => Math.max(s - Math.min(10, outputLineLimit), 0));
         return;
       }
       if (key.pageUp) {
-        setScrollOffset((s) => Math.min(s + visibleLineLimit, Math.max(0, lines.length - visibleLineLimit)));
+        setScrollOffset((s) => Math.min(s + outputLineLimit, maxScrollOffset));
         return;
       }
       if (key.pageDown) {
-        setScrollOffset((s) => Math.max(s - visibleLineLimit, 0));
+        setScrollOffset((s) => Math.max(s - outputLineLimit, 0));
         return;
       }
     },
@@ -137,21 +145,29 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
 
   return (
     <Box flexDirection="column" width={screenWidth} height={panelHeight} overflow="hidden">
-      <Box borderStyle="single" borderBottom={true} borderLeft={false} borderRight={false} borderTop={false}>
-        <Text bold>📟 Process Output</Text>
+      <Box
+        flexShrink={0}
+        borderStyle="single"
+        borderBottom={true}
+        borderLeft={false}
+        borderRight={false}
+        borderTop={false}
+      >
+        <Box flexShrink={0}>
+          <Text bold>📟 Process Output</Text>
+        </Box>
         <Text
           dimColor
           wrap="truncate-end"
         >{` (${canAdjustTimeout ? `timeout ${formatDuration(selected.timeoutMs!)} · +/- adjust · ` : ""}←→ history · Ctrl+O or Esc close · ↑↓ PgUp/PgDn scroll)`}</Text>
       </Box>
-      <Box flexDirection="column" paddingX={1} overflow="hidden">
-        <Text wrap="truncate-end">{selected ? formatProcessOutputTitle(selected) : "(no process output)"}</Text>
-        {selected &&
-          visibleLines.map((line, index) => (
-            <Text key={`${index}`} wrap="truncate-end">
-              {line}
-            </Text>
-          ))}
+      <Box flexDirection="column" flexShrink={0} paddingX={1} overflow="hidden">
+        {pinTitle && <Text wrap="hard">{titleLines.join("\n")}</Text>}
+        {visibleLines.map((line, index) => (
+          <Text key={`${index}`} wrap="truncate-end">
+            {line || " "}
+          </Text>
+        ))}
       </Box>
       {statusMessage ? (
         <Box paddingX={1}>

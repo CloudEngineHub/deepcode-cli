@@ -155,6 +155,63 @@ test("panel retains the selected result, navigates history and targets timeout a
   assert.equal(dismissed, 1);
 });
 
+test("panel wraps the complete command and keeps output scrollable within its height", async (t) => {
+  const command = `python3 -c "print('/System/Library/AssetsV2/${"路径👩‍💻".repeat(25)}/command-end')"`;
+  const output = Array.from({ length: 40 }, (_, i) => `output-${i}`).join("\n");
+  const items = buildProcessOutputItems([toolMessage("long", command, output, 0)], null);
+  const h = await terminal(
+    t,
+    React.createElement(ProcessStdoutView, {
+      processStdoutRef: { current: new Map() },
+      items,
+      onDismiss() {},
+      onAdjustTimeout: () => null,
+      screenWidth: 48,
+      screenHeight: 15,
+    })
+  );
+  const assertFullCommand = () => assert.ok(h.frame().replace(/\s/g, "").includes(command.replace(/\s/g, "")));
+  assertFullCommand();
+  assert.match(h.frame(), /output-39/);
+  assert.ok(h.frame().trimEnd().split("\n").length <= 14);
+
+  for (let i = 0; i < 10 && !/output-0\b/.test(h.frame()); i++) await h.send("\u001b[A");
+  assertFullCommand();
+  assert.match(h.frame(), /output-0\b/);
+  assert.doesNotMatch(h.frame(), /output-39/);
+  for (let i = 0; i < 10 && !h.frame().includes("output-39"); i++) await h.send("\u001b[B");
+  assert.match(h.frame(), /output-39/);
+});
+
+test("commands taller than the panel can be paged through completely and reflow on resize", async (t) => {
+  const commandLines = ["python3 <<'PY'", ...Array.from({ length: 18 }, (_, i) => `print('command-${i}')`), "", "PY"];
+  const items = buildProcessOutputItems([toolMessage("multiline", commandLines.join("\n"), "finished", 0)], null);
+  const view = (screenWidth: number, screenHeight: number) =>
+    React.createElement(ProcessStdoutView, {
+      processStdoutRef: { current: new Map<number, string>() },
+      items,
+      onDismiss() {},
+      onAdjustTimeout: () => null,
+      screenWidth,
+      screenHeight,
+    });
+  const h = await terminal(t, view(48, 12));
+  assert.match(h.frame(), /finished/);
+  const frames = [h.frame()];
+  for (let i = 0; i < 3 && !h.frame().includes("[python3"); i++) {
+    await h.send("\u001b[5~");
+    frames.push(h.frame());
+    assert.ok(h.frame().trimEnd().split("\n").length <= 11);
+  }
+  assert.match(h.frame(), /── \(return 0\) \[python3/);
+  for (const line of commandLines) assert.ok(frames.some((frame) => frame.includes(line)));
+
+  await h.rerender(view(80, 30));
+  const frame = h.frame();
+  for (const line of commandLines) assert.ok(frame.includes(line));
+  assert.match(frame, /finished/);
+});
+
 test("Ctrl+O opens output for an empty prompt and expands pasted text in a nonempty prompt", async (t) => {
   let opened = 0;
   const h = await terminal(
