@@ -230,11 +230,14 @@ test("WebSearch translates the query before using the default API with the DeepS
   const starts: Array<{ id: string | number; command: string }> = [];
   const exits: Array<string | number> = [];
   const searchQueries: unknown[] = [];
+  const llmRequests: Array<Record<string, unknown>> = [];
 
   const fakeClient = {
     chat: {
       completions: {
-        create: async ({ messages }: { messages: Array<{ content: string }> }) => {
+        create: async (request: { messages: Array<{ content: string }> }) => {
+          llmRequests.push(request);
+          const { messages } = request;
           const prompt = messages[0]?.content ?? "";
           if (prompt.includes("Return strict JSON:")) {
             return {
@@ -281,6 +284,11 @@ test("WebSearch translates the query before using the default API with the DeepS
   assert.equal(result.metadata?.originalQuery, "Node.js 最新版本");
   assert.equal(result.metadata?.resolvedQuery, "latest Node.js release");
   assert.equal(result.metadata?.translated, true);
+  assert.equal(llmRequests.length, 2);
+  for (const request of llmRequests) {
+    assert.deepEqual(request.thinking, { type: "disabled" });
+    assert.ok(!("reasoning_effort" in request));
+  }
   assert.deepEqual(searchQueries, [{ query: "latest Node.js release" }]);
   assert.equal(starts.length, 1);
   assert.equal(starts[0].command, "WebSearch: latest Node.js release");
@@ -328,7 +336,7 @@ function createContext(
       client: options.client ?? null,
       model: options.model ?? "test-model",
       baseURL: options.baseURL,
-      thinkingEnabled: false,
+      thinkingEnabled: true,
       webSearchTool: options.webSearchTool,
       env: options.env,
       machineId: options.machineId,

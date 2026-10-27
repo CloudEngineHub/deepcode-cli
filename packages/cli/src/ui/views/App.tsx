@@ -58,6 +58,7 @@ import type {
 } from "@vegamo/deepcode-core";
 import { SessionManager } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
+import { createTerminalTitle } from "../../utils/terminal-title";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -72,6 +73,7 @@ type AppProps = {
 function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRestart }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout, write } = useStdout();
+  const terminalTitle = useMemo(() => createTerminalTitle(stdout), [stdout]);
   const { columns, rows } = useWindowSize();
   const { mode, setMode } = useRawModeContext();
   const initialPromptSubmittedRef = useRef(false);
@@ -134,6 +136,12 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         }
       },
       onSessionEntryUpdated: (entry) => {
+        setSessions((previous) =>
+          [...previous.filter((session) => session.id !== entry.id), entry].sort((a, b) =>
+            b.updateTime.localeCompare(a.updateTime)
+          )
+        );
+        if (sessionManager.getActiveSessionId() !== entry.id) return;
         setStatusLine(buildStatusLine(entry, resolveCurrentSettings(projectRoot)));
         setRunningProcesses(entry.processes);
         setActiveStatus(entry.status);
@@ -169,6 +177,14 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       },
     });
   }, [projectRoot, clientFactory]);
+
+  const activeSessionId = sessionManager.getActiveSessionId();
+  useEffect(() => {
+    const entry = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
+    terminalTitle.set(entry?.summary || "Deep Code");
+  }, [activeSessionId, sessionManager, sessions, terminalTitle]);
+
+  useEffect(() => () => terminalTitle.clear(), [terminalTitle]);
 
   /**
    * Navigate to a sub-view.

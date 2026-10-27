@@ -1,5 +1,6 @@
 import { resolvePlusHost } from "../common/plus-subscription";
 import { bindProcessAbort } from "../common/process-abort";
+import { buildThinkingRequestOptions } from "../common/openai-thinking";
 import { randomUUID } from "crypto";
 import { spawn } from "child_process";
 import type OpenAI from "openai";
@@ -304,6 +305,7 @@ async function chat(llmContext: LLMClientContext, prompt: string): Promise<strin
     {
       model: llmContext.model,
       messages: [{ role: "user", content: prompt }],
+      ...buildThinkingRequestOptions(false, llmContext.baseURL),
     },
     { signal: llmContext.signal }
   );

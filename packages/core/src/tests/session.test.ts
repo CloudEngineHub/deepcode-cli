@@ -801,7 +801,7 @@ test("SessionManager excludes implicit opt-out skills from automatic matching ca
   (manager as any).activateSession = async () => {};
 
   const sessionId = await manager.createSession({ text: "choose an automatic skill" });
-  const matchingPrompt = String(requests[0]?.messages?.[0]?.content ?? "");
+  const matchingPrompt = String(requests.find((request) => request.stream)?.messages?.[0]?.content ?? "");
 
   assert.match(matchingPrompt, /"name": "auto-skill"/);
   assert.doesNotMatch(matchingPrompt, /"name": "manual-only"/);
@@ -829,7 +829,7 @@ test("replySession appends the skill catalog only when content changes", async (
     chat: {
       completions: {
         create: async (request: any) => {
-          if (isSkillMatchingRequest(request)) {
+          if (isSkillMatchingRequest(request) && request.stream) {
             return createSkillMatchingResponse(matchingNames.shift() ?? []);
           }
           return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
@@ -1494,7 +1494,10 @@ test("createSession includes agent instructions in the skill matching system pro
 
   await manager.createSession({ text: "pick the right workflow" });
 
-  const messages = (requests[0]?.messages ?? []) as Array<{ role?: string; content?: string }>;
+  const messages = (requests.find((request) => request.stream)?.messages ?? []) as Array<{
+    role?: string;
+    content?: string;
+  }>;
   assert.equal(messages[0]?.role, "system");
   assert.match(messages[0]?.content ?? "", /<agent-instructions>/);
   assert.match(messages[0]?.content ?? "", /prefer project-specific skill matching/);
