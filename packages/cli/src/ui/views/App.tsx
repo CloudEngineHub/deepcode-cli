@@ -725,6 +725,11 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     [sessionManager, refreshSessionsList, resetToWelcome]
   );
 
+  const handlePromptDraftApplied = useCallback((nonce: number) => {
+    // Consume the draft so remounting PromptInput cannot restore it again.
+    setPromptDraft((draft) => (draft?.nonce === nonce ? null : draft));
+  }, []);
+
   const handleUndoRestore = useCallback(
     async (target: UndoTarget, restoreMode: UndoRestoreMode): Promise<void> => {
       const sessionId = sessionManager.getActiveSessionId();
@@ -1137,6 +1142,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           loadingText={loadingText}
           runningProcesses={runningProcesses}
           promptDraft={promptDraft}
+          onPromptDraftApplied={handlePromptDraftApplied}
           onSubmit={handleSubmit}
           onModelConfigChange={handleModelConfigChange}
           onRawModeChange={handleRawModeChange}

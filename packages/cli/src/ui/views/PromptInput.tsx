@@ -105,6 +105,7 @@ type Props = {
   statusLineSeparator?: string;
   planMode: boolean;
   onSubmit: (submission: PromptSubmission) => void;
+  onPromptDraftApplied: (nonce: number) => void;
   onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
   onRawModeChange?: (mode: string) => void;
   onPlanModeChange: (enabled: boolean) => void;
@@ -140,6 +141,7 @@ export const PromptInput = React.memo(function PromptInput({
   statusLineSeparator,
   planMode,
   onSubmit,
+  onPromptDraftApplied,
   onModelConfigChange,
   onInterrupt,
   onToggleProcessStdout,
@@ -312,7 +314,8 @@ export const PromptInput = React.memo(function PromptInput({
     exitHistoryBrowsing();
     clearPromptUndoRedoState(undoRedoRef.current);
     resetPastes();
-  }, [promptDraft, exitHistoryBrowsing, resetPastes]);
+    onPromptDraftApplied(promptDraft.nonce);
+  }, [promptDraft, onPromptDraftApplied, exitHistoryBrowsing, resetPastes]);
 
   useEffect(() => {
     exitHistoryBrowsing();

@@ -1,0 +1,204 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough, Writable } from "node:stream";
+import { test, type TestContext } from "node:test";
+import { setTimeout } from "node:timers/promises";
+import { stripVTControlCharacters } from "node:util";
+import React from "react";
+import { render } from "ink";
+import {
+  SessionManager,
+  type SessionEntry,
+  type SessionManagerOptions,
+  type SessionMessage,
+  type UserPromptContent,
+} from "@vegamo/deepcode-core";
+import App from "../ui/views/App";
+
+const WEATHER_PROMPT = "用 AskUserQuestion tool 查询天气预报";
+const QUESTION = "想查询哪个城市的天气预报？";
+
+async function harness(t: TestContext, imageUrls: string[] = []) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-undo-draft-"));
+  const originalEnv = process.env;
+  process.env = Object.fromEntries(Object.entries(originalEnv).filter(([key]) => !key.startsWith("DEEPCODE_")));
+  t.mock.method(os, "homedir", () => root);
+  syncBuiltinESMExports();
+  fs.mkdirSync(path.join(root, ".deepcode"));
+  fs.writeFileSync(path.join(root, ".deepcode", "settings.json"), JSON.stringify({ statusline: { enabled: false } }));
+  const entry: SessionEntry = {
+    id: "undo-test",
+    summary: "今天星期几",
+    assistantReply: null,
+    assistantThinking: null,
+    assistantRefusal: null,
+    toolCalls: null,
+    status: "completed",
+    failReason: null,
+    usage: null,
+    usagePerModel: null,
+    activeTokens: 0,
+    processes: null,
+    createTime: "2026-10-27T00:00:00Z",
+    updateTime: "2026-10-27T00:00:00Z",
+  };
+  let nextId = 0;
+  function message(role: SessionMessage["role"], content: string): SessionMessage {
+    return {
+      id: String(++nextId),
+      sessionId: entry.id,
+      role,
+      content,
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: true,
+      createTime: entry.createTime,
+      updateTime: entry.updateTime,
+    };
+  }
+  const originalPrompt = message("user", "今天星期几");
+  originalPrompt.meta = { userPrompt: { text: originalPrompt.content ?? "", imageUrls } };
+  let history = [originalPrompt, message("assistant", "今天是星期二。")];
+  t.mock.method(SessionManager.prototype, "initMcpServers", async () => {});
+  t.mock.method(SessionManager.prototype, "listSkills", async () => []);
+  t.mock.method(SessionManager.prototype, "getActiveSessionId", () => entry.id);
+  t.mock.method(SessionManager.prototype, "getSession", () => entry);
+  t.mock.method(SessionManager.prototype, "listSessions", () => [entry]);
+  t.mock.method(SessionManager.prototype, "listSessionMessages", () => history);
+  t.mock.method(SessionManager.prototype, "restoreSessionConversation", (_sessionId: string, messageId: string) => {
+    const index = history.findIndex((item) => item.id === messageId);
+    assert.ok(index >= 0);
+    history = history.slice(0, index);
+    return history;
+  });
+  const submissions: UserPromptContent[] = [];
+  t.mock.method(
+    SessionManager.prototype,
+    "handleUserPrompt",
+    async function (this: SessionManager, prompt: UserPromptContent) {
+      submissions.push(prompt);
+      const userMessage = message("user", prompt.text ?? "");
+      userMessage.meta = { userPrompt: prompt, isAnswers: prompt.isAnswers };
+      history.push(userMessage);
+      const events = this as unknown as Pick<SessionManagerOptions, "onAssistantMessage" | "onSessionEntryUpdated">;
+      if (prompt.text === WEATHER_PROMPT) {
+        const question = message(
+          "tool",
+          JSON.stringify({
+            awaitUserResponse: true,
+            metadata: {
+              kind: "ask_user_question",
+              questions: [{ question: QUESTION, options: [{ label: "北京" }, { label: "上海" }] }],
+            },
+          })
+        );
+        history.push(question);
+        events.onAssistantMessage(question, false);
+        entry.status = "waiting_for_user";
+      } else {
+        entry.status = "completed";
+      }
+      events.onSessionEntryUpdated?.({ ...entry });
+    }
+  );
+  const frames: string[] = [];
+  const output = Object.assign(
+    new Writable({
+      write(chunk, _encoding, callback) {
+        const frame = stripVTControlCharacters(chunk.toString());
+        if (frame.trim()) frames.push(frame);
+        callback();
+      },
+    }),
+    { columns: 120, rows: 40, isTTY: true }
+  );
+  const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode() {}, ref() {}, unref() {} });
+  const app = render(React.createElement(App, { projectRoot: root, resumeSessionId: entry.id }), {
+    stdin: input as unknown as NodeJS.ReadStream,
+    stdout: output as unknown as NodeJS.WriteStream,
+    stderr: output as unknown as NodeJS.WriteStream,
+    debug: true,
+    patchConsole: false,
+    exitOnCtrlC: false,
+  });
+  t.after(() => {
+    app.unmount();
+    app.cleanup();
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    process.env = originalEnv;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  async function flush() {
+    await setTimeout(30);
+    await app.waitUntilRenderFlush();
+  }
+  async function send(value: string) {
+    input.write(value);
+    await flush();
+  }
+  async function submit(value: string) {
+    await send(value);
+    await send("\r");
+  }
+  await flush();
+  return {
+    submissions,
+    send,
+    submit,
+    latest: () => frames.at(-1) ?? "",
+    async undo() {
+      await submit("/undo");
+      await send("\r"); // Select the latest user message.
+      await send("\r"); // Restore the conversation.
+    },
+  };
+}
+
+for (const action of ["answer", "cancel"] as const) {
+  test(`/undo draft does not return after ${action}ing AskUserQuestion`, async (t) => {
+    const h = await harness(t);
+    await h.undo();
+    assert.match(h.latest(), /^> 今天星期几$/m);
+    await h.send("\u0015");
+    await h.submit("明天星期几");
+    assert.equal(h.submissions[0]?.text, "明天星期几", h.latest());
+    await h.submit(WEATHER_PROMPT);
+    assert.match(h.latest(), /想查询哪个城市的天气预报？/);
+    await h.send(action === "answer" ? "\r" : "\u001b");
+    assert.match(h.latest(), /Type your message\.\.\./);
+    assert.doesNotMatch(h.latest(), /^> 今天星期几$/m);
+    if (action === "answer") {
+      assert.equal(h.submissions.at(-1)?.isAnswers, true);
+      assert.match(h.submissions.at(-1)?.text ?? "", /answer: 北京/);
+    } else {
+      assert.equal(h.submissions.length, 2);
+    }
+    await h.submit("继续");
+    assert.equal(h.submissions.at(-1)?.text, "继续");
+  });
+}
+
+test("consuming an /undo draft preserves its attachments and allows another undo", async (t) => {
+  const images = ["data:image/png;base64,aW1hZ2U="];
+  const h = await harness(t, images);
+  await h.undo();
+  assert.match(h.latest(), /^> 今天星期几$/m);
+  await h.send("\u0015");
+  await h.submit("明天星期几");
+  assert.deepEqual(h.submissions.at(-1)?.imageUrls, images);
+  await h.undo();
+  assert.match(h.latest(), /^> 明天星期几$/m);
+  await h.send("\r");
+  assert.equal(h.submissions.at(-1)?.text, "明天星期几");
+  assert.deepEqual(h.submissions.at(-1)?.imageUrls, images);
+  await h.submit(WEATHER_PROMPT);
+  await h.send("\r");
+  await h.submit("继续");
+  assert.equal(h.submissions.at(-1)?.text, "继续");
+  assert.deepEqual(h.submissions.at(-1)?.imageUrls, []);
+});
