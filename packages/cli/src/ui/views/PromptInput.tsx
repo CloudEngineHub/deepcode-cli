@@ -202,13 +202,8 @@ export const PromptInput = React.memo(function PromptInput({
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
-  const processOrPasteHint = isEmpty(buffer)
-    ? " · ctrl+o view output"
-    : hasCollapsedMarkers
-      ? " · ctrl+o expand"
-      : hasExpandedRegions
-        ? " · ctrl+o collapse"
-        : "";
+  const pasteHint = hasCollapsedMarkers ? " · ctrl+o expand" : hasExpandedRegions ? " · ctrl+o collapse" : "";
+  const processOrPasteHint = isEmpty(buffer) ? " · ctrl+o view output" : pasteHint;
   const busyStatusText =
     loadingText && loadingText.trim()
       ? `${loadingText}${processOrPasteHint}`
@@ -217,7 +212,7 @@ export const PromptInput = React.memo(function PromptInput({
     ? statusMessage
     : busy
       ? busyStatusText
-      : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
+      : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${pasteHint}`;
   const showFooterText = useMemo(
     () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
     [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
