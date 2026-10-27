@@ -12,6 +12,16 @@ type ThinkingRequestOptions = {
 };
 
 export function buildThinkingRequestOptions(
+  thinkingEnabled: false,
+  baseURL?: string,
+  reasoningEffort?: ReasoningEffort
+): { thinking: { type: "disabled" } };
+export function buildThinkingRequestOptions(
+  thinkingEnabled: boolean,
+  baseURL?: string,
+  reasoningEffort?: ReasoningEffort
+): ThinkingRequestOptions;
+export function buildThinkingRequestOptions(
   thinkingEnabled: boolean,
   _baseURL?: string,
   reasoningEffort: ReasoningEffort = "max"

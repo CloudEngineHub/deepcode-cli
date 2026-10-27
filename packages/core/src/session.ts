@@ -9,6 +9,7 @@ import ejs from "ejs";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
+import { firstMessageTitlePrompt, recentConversationTitlePrompt, generateSessionTitle } from "./common/session-title";
 import { readTextFileWithMetadata } from "./common/file-utils";
 import {
   buildSkillCatalogPrompt,
@@ -298,6 +299,7 @@ export type SessionEntry = {
   askPermissions?: AskPermissionRequest[];
   planMode?: boolean;
   pluginRateLimitedTool?: PluginRateLimitedTool;
+  autoTitlePending?: boolean;
   usingPlus?: boolean;
   forkedFrom?: {
     sessionId: string;
@@ -518,6 +520,8 @@ export class SessionManager {
   }
 
   dispose(): void {
+    for (const controller of this.titleControllers.values()) controller.abort();
+    this.titleControllers.clear();
     const controller = this.activePromptController;
     if (controller && !controller.signal.aborted) {
       controller.abort();
@@ -536,6 +540,7 @@ export class SessionManager {
   }
 
   private readonly compactingSessions = new Set<string>();
+  private readonly titleControllers = new Map<string, AbortController>();
   private readonly requestUsageAnchors = new Map<
     string,
     {
@@ -1536,6 +1541,7 @@ ${agentInstructions}
       updateTime: now,
       processes: null,
       planMode: Boolean(userPrompt.planMode),
+      autoTitlePending: true,
     };
     index.entries.push(entry);
     const sortedEntries = index.entries.slice().sort((a, b) => {
@@ -1584,6 +1590,7 @@ ${agentInstructions}
     this.recordUserPromptCheckpoint(sessionId);
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
+    this.maybeGenerateSessionTitle(sessionId, userPrompt);
 
     let matchedSkills: SkillInfo[] = [];
     if (userPrompt.text) {
@@ -1665,6 +1672,7 @@ ${agentInstructions}
     }
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
+    this.maybeGenerateSessionTitle(sessionId, userPrompt);
 
     let matchedSkills: SkillInfo[] = [];
     if (userPrompt.text) {
@@ -2538,6 +2546,7 @@ ${agentInstructions}
       updateTime: now,
       processes: null,
       planMode: source.planMode,
+      autoTitlePending: true,
       usingPlus: source.usingPlus,
       forkedFrom: {
         sessionId: sourceSessionId,
@@ -2599,6 +2608,40 @@ ${agentInstructions}
       processIds: this.getProcessIds(targetEntry?.processes ?? null),
     });
     return true;
+  }
+
+  private maybeGenerateSessionTitle(sessionId: string, userPrompt: UserPromptContent): void {
+    const entry = this.getSession(sessionId);
+    if (
+      !entry?.autoTitlePending ||
+      userPrompt.isAnswers ||
+      hasUserPermissionReplies(userPrompt) ||
+      this.isContinuePrompt(userPrompt)
+    ) {
+      return;
+    }
+    this.updateSessionEntry(sessionId, (existing) => ({ ...existing, autoTitlePending: false }));
+    if (!userPrompt.text?.trim()) return;
+
+    const prompt = entry.forkedFrom
+      ? recentConversationTitlePrompt(this.listSessionMessages(sessionId))
+      : firstMessageTitlePrompt(userPrompt.text);
+    if (!prompt) return;
+    const controller = new AbortController();
+    this.titleControllers.set(sessionId, controller);
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    timeout.unref();
+    void generateSessionTitle(this.createOpenAIClient, prompt, controller.signal)
+      .then((title) => {
+        if (title && !controller.signal.aborted) this.renameSession(sessionId, title);
+      })
+      .catch(() => {
+        // Naming is best effort; keep the existing title on failure.
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        this.titleControllers.delete(sessionId);
+      });
   }
 
   /**
@@ -3814,6 +3857,7 @@ ${agentInstructions}
     return {
       id: typeof value.id === "string" ? value.id : crypto.randomUUID(),
       summary: typeof value.summary === "string" ? value.summary : null,
+      autoTitlePending: value.autoTitlePending === true,
       assistantReply: typeof value.assistantReply === "string" ? value.assistantReply : null,
       assistantThinking: typeof value.assistantThinking === "string" ? value.assistantThinking : null,
       assistantRefusal: typeof value.assistantRefusal === "string" ? value.assistantRefusal : null,
