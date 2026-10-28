@@ -472,3 +472,25 @@ for (const flag of ["-s", "--settings"]) {
     });
   }
 }
+
+test("--doctor accepts only an optional settings input", async () => {
+  const parsed = await parseArguments(["--doctor", "-s", "custom.json"]);
+  assert.equal(parsed.doctor, true);
+  assert.equal(parsed.settingsFile, "custom.json");
+  assert.equal((await parseArguments([])).doctor, false);
+  for (const flags of [
+    ["--plus"],
+    ["--json"],
+    ["-x"],
+    ["-p", "hi"],
+    ["hi"],
+    ["-r"],
+    ["-f"],
+    ["-l"],
+    ["--session-id", "x"],
+  ]) {
+    await withMockedExit(async () => {
+      await assert.rejects(parseArguments(["--doctor", ...flags]), /process.exit\(1\)/);
+    });
+  }
+});

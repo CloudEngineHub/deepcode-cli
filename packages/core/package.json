@@ -14,6 +14,34 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./settings-diagnostics": {
+      "types": "./dist/settings-diagnostics.d.ts",
+      "import": "./dist/settings-diagnostics.js"
+    },
+    "./common/doctor-api": {
+      "types": "./dist/common/doctor-api.d.ts",
+      "import": "./dist/common/doctor-api.js"
+    },
+    "./common/plus-subscription": {
+      "types": "./dist/common/plus-subscription.d.ts",
+      "import": "./dist/common/plus-subscription.js"
+    },
+    "./common/shell-utils": {
+      "types": "./dist/common/shell-utils.d.ts",
+      "import": "./dist/common/shell-utils.js"
+    },
+    "./common/npm-registry": {
+      "types": "./dist/common/npm-registry.d.ts",
+      "import": "./dist/common/npm-registry.js"
+    },
+    "./common/session-id": {
+      "types": "./dist/common/session-id.d.ts",
+      "import": "./dist/common/session-id.js"
+    },
+    "./common/process-tree": {
+      "types": "./dist/common/process-tree.d.ts",
+      "import": "./dist/common/process-tree.js"
     }
   },
   "files": [
