@@ -60,6 +60,7 @@ import type {
 import { SessionManager } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
 import { createTerminalTitle, terminalTitleState } from "../../utils/terminal-title";
+import { writeRawMode } from "../../common/cli-config";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -801,6 +802,13 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     (nextMode: string) => {
       const activeSessionId = sessionManager.getActiveSessionId();
       setMode(nextMode as RawMode);
+      if (nextMode === RawMode.Lite || nextMode === RawMode.None) {
+        try {
+          writeRawMode(nextMode === RawMode.Lite ? "lite" : "normal");
+        } catch {
+          setErrorLine("Could not save display mode.");
+        }
+      }
       // Reset chat view state synchronously so the transition frame does not
       // re-render a stale welcome screen before handleSelectSession runs.
       setShowWelcome(false);

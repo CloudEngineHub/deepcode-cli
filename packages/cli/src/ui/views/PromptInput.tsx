@@ -67,6 +67,7 @@ import {
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import type { ModelConfigSelection, PermissionScope } from "@vegamo/deepcode-core";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
+import { RawMode } from "../contexts";
 import type { SkillInfo } from "@vegamo/deepcode-core";
 import type { UserToolPermission } from "@vegamo/deepcode-core";
 import type { StatusSegment } from "../statusline";
@@ -777,7 +778,8 @@ export const PromptInput = React.memo(function PromptInput({
         return;
       }
       if (slash.kind === "raw") {
-        onRawModeChange?.(slash.mode);
+        const mode = slash.mode === "lite" ? RawMode.Lite : slash.mode === "normal" ? RawMode.None : RawMode.Raw;
+        onRawModeChange?.(mode);
         resetPromptInput();
         return;
       }
