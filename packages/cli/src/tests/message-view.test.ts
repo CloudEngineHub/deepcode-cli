@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
@@ -22,17 +23,17 @@ test("parseDiffPreview removes headers and classifies lines", () => {
   );
 
   assert.deepEqual(lines, [
-    { marker: " ", content: "context", kind: "context" },
-    { marker: "-", content: "old", kind: "removed" },
-    { marker: "+", content: "new", kind: "added" },
+    { marker: " ", content: "context", kind: "context", lineNumber: 1 },
+    { marker: "-", content: "old", kind: "removed", lineNumber: 1 },
+    { marker: "+", content: "new", kind: "added", lineNumber: 1 },
   ]);
 });
 
 test("parseDiffPreview keeps nonstandard context lines", () => {
   const lines = parseDiffPreview("...\n+added");
   assert.deepEqual(lines, [
-    { marker: " ", content: "...", kind: "context" },
-    { marker: "+", content: "added", kind: "added" },
+    { marker: " ", content: "...", kind: "context", lineNumber: null },
+    { marker: "+", content: "added", kind: "added", lineNumber: null },
   ]);
 });
 
@@ -385,4 +386,101 @@ test("parseToolPayload respects ok: false", () => {
 test("parseToolPayload trims whitespace from name", () => {
   const result = parseToolPayload(JSON.stringify({ name: "  read  ", ok: true }));
   assert.equal(result.name, "read");
+});
+
+// Both freshly generated metadata and legacy sessions share the same presentation.
+for (const name of ["edit", "write"]) {
+  test(`MessageView renders ${name} diff paths, totals and aligned line numbers`, () => {
+    const message = makeSessionMessage({
+      role: "tool",
+      content: JSON.stringify({
+        name,
+        ok: true,
+        metadata: {
+          file_path: "/project/src/example.ts",
+          diff_preview: "--- a/file\n+++ b/file\n@@ -99,1 +99,2 @@\n before\n-old\n+new\n+extra\n after",
+        },
+      }),
+    });
+    const output = renderToString(React.createElement(MessageView, { message, projectRoot: "/project", width: 80 }), {
+      columns: 80,
+    });
+    assert.ok(output.includes("└ src/example.ts · +2 -1"), output);
+    assert.ok(output.includes(" 98   before"), output);
+    assert.ok(output.includes(" 99 - old"), output);
+    assert.ok(output.includes(" 99 + new"), output);
+    assert.ok(output.includes("100 + extra"), output);
+    assert.ok(output.includes("101   after"), output);
+    assert.ok(!output.includes("Changes"));
+    assert.ok(!output.includes("/project/"));
+  });
+}
+
+test("MessageView keeps line numbers gray independently of added and removed code", () => {
+  const message = makeSessionMessage({
+    role: "tool",
+    content: JSON.stringify({
+      name: "edit",
+      ok: true,
+      metadata: {
+        file_path: "/project/file.ts",
+        diff_details: {
+          added: 1,
+          removed: 1,
+          lines: [
+            { kind: "removed", content: "old", lineNumber: 12 },
+            { kind: "added", content: "new", lineNumber: 12 },
+          ],
+        },
+      },
+    }),
+  });
+  const moduleUrl = new URL("../ui/components/MessageView/index.tsx", import.meta.url).href;
+  const script = `
+    import React from "react";
+    import { renderToString } from "ink";
+    import { MessageView } from ${JSON.stringify(moduleUrl)};
+    console.log(JSON.stringify(renderToString(React.createElement(MessageView, {
+      message: ${JSON.stringify(message)}, projectRoot: "/project"
+    }))));
+  `;
+  const output = JSON.parse(
+    execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+      env: { ...process.env, FORCE_COLOR: "1" },
+      encoding: "utf8",
+    })
+  );
+  assert.ok(output.includes("\x1b[90m12 "), JSON.stringify(output));
+  assert.ok(output.includes("\x1b[31m- old"), JSON.stringify(output));
+  assert.ok(output.includes("\x1b[32m+ new"), JSON.stringify(output));
+});
+
+test("MessageView retains totals and row numbers when long paths and code are truncated", () => {
+  const message = makeSessionMessage({
+    role: "tool",
+    content: JSON.stringify({
+      name: "write",
+      ok: true,
+      metadata: {
+        file_path: "/project/very-long-directory-name/another-directory/example.ts",
+        diff_details: {
+          added: 123,
+          removed: 0,
+          lines: [
+            { kind: "added", content: "x".repeat(100), lineNumber: 1 },
+            { kind: "context", content: "...", lineNumber: null },
+          ],
+        },
+      },
+    }),
+  });
+  const output = renderToString(React.createElement(MessageView, { message, projectRoot: "/project", width: 40 }), {
+    columns: 40,
+  });
+  assert.ok(output.includes("+123 -0"), output);
+  assert.ok(output.includes("1 + "), output);
+  assert.ok(
+    output.split("\n").every((line) => line.length <= 40),
+    output
+  );
 });

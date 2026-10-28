@@ -104,6 +104,7 @@
     <script nonce="{{nonce}}">
       const vscode = acquireVsCodeApi();
       const workspaceRoot = {{workspaceRoot}};
+      const userHome = {{userHome}};
       const app = document.querySelector(".app");
       const messages = document.getElementById("messages");
       const inputWrap = document.querySelector(".input-wrap");
@@ -1337,8 +1338,8 @@
         fileRow.appendChild(fileButton);
         details.appendChild(fileRow);
 
-        if (typeof metadata.diff_preview === "string" && metadata.diff_preview.trim()) {
-          const diffBlock = renderDiffPreview(metadata.diff_preview);
+        if (metadata.diff_details) {
+          const diffBlock = renderDiffPreview(metadata);
           if (diffBlock) {
             details.appendChild(diffBlock);
           }
@@ -1472,6 +1473,10 @@
           }
         }
 
+        if (userHome && isPathInsideWorkspace(filePath, userHome)) {
+          const relative = getRelativePath(filePath, userHome);
+          return relative ? `~/${relative}` : "~";
+        }
         return filePath;
       }
 
@@ -1494,58 +1499,47 @@
         return String(value || "").replace(/\\/g, "/").replace(/\/+$/, "");
       }
 
-      function renderDiffPreview(diffPreview) {
-        const lines = String(diffPreview || "").split("\n");
-        const meaningfulLines = lines.filter((line) => {
-          return !line.startsWith("--- ") &&
-            !line.startsWith("+++ ") &&
-            !line.startsWith("@@ ");
-        });
-
-        if (meaningfulLines.length === 0) {
-          return null;
-        }
+      function renderDiffPreview(metadata) {
+        const diff = metadata.diff_details;
+        if (!diff || !diff.lines.length) return null;
 
         const section = document.createElement("div");
         section.className = "tool-result-diff";
-
         const label = document.createElement("div");
-        label.className = "tool-result-label";
-        label.textContent = "Changes";
+        label.className = "tool-result-label diff-heading";
+        label.appendChild(document.createTextNode(`└ ${formatDisplayPath(metadata.file_path)} · `));
+        const added = document.createElement("span");
+        added.className = "diff-added-count";
+        added.textContent = `+${diff.added}`;
+        const removed = document.createElement("span");
+        removed.className = "diff-removed-count";
+        removed.textContent = `-${diff.removed}`;
+        label.appendChild(added);
+        label.appendChild(document.createTextNode(" "));
+        label.appendChild(removed);
         section.appendChild(label);
 
         const list = document.createElement("div");
         list.className = "diff-preview";
-
-        meaningfulLines.forEach((line) => {
-          if (!line) {
-            return;
-          }
-
+        const numberWidth = Math.max(1, ...diff.lines.map((line) => String(line.lineNumber ?? "").length));
+        list.style.setProperty("--diff-number-width", `${numberWidth}ch`);
+        diff.lines.forEach((line) => {
           const row = document.createElement("div");
-          row.className = "diff-line";
-
+          row.className = `diff-line ${line.kind}`;
+          const number = document.createElement("span");
+          number.className = "diff-line-number";
+          number.textContent = String(line.lineNumber ?? "");
           const marker = document.createElement("span");
           marker.className = "diff-line-marker";
-          marker.textContent = line[0] === "+" || line[0] === "-" ? line[0] : " ";
-
+          marker.textContent = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ";
           const content = document.createElement("span");
           content.className = "diff-line-content";
-          content.textContent = line.slice(1);
-
-          if (line.startsWith("+")) {
-            row.classList.add("added");
-          } else if (line.startsWith("-")) {
-            row.classList.add("removed");
-          } else {
-            row.classList.add("context");
-          }
-
+          content.textContent = line.content;
+          row.appendChild(number);
           row.appendChild(marker);
           row.appendChild(content);
           list.appendChild(row);
         });
-
         section.appendChild(list);
         return section;
       }

@@ -520,3 +520,23 @@ test("loadSession returns null for empty processes", () => {
   const loadMsg = messages.find((m: any) => m.type === "loadSession") as any;
   assert.equal(loadMsg.processes, null);
 });
+
+test("loadSession prepares legacy tool diffs without modifying persisted content", () => {
+  const content = JSON.stringify({
+    name: "edit",
+    ok: true,
+    metadata: {
+      file_path: "/project/file.ts",
+      diff_preview: "--- a/file\n+++ b/file\n@@ -2,1 +2,1 @@\n context\n-old\n+new",
+    },
+  });
+  const original = { role: "tool", content, visible: true };
+  const deps = createDeps({ messages: [original] });
+  loadSession("session-1", deps.sessionManager, deps.postMessage, (text) => text);
+  const loaded = deps.messages.find((message: any) => message.type === "loadSession") as any;
+  const metadata = JSON.parse(loaded.messages[0].content).metadata;
+  assert.equal(metadata.diff_details.added, 1);
+  assert.equal(metadata.diff_details.removed, 1);
+  assert.equal(metadata.diff_details.lines[0].lineNumber, 1);
+  assert.equal(original.content, content);
+});

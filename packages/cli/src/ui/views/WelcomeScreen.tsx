@@ -1,13 +1,14 @@
 import React, { useMemo, useState } from "react";
 import { Box, Text } from "ink";
-import * as os from "node:os";
-import path from "node:path";
 import type { SkillInfo } from "@vegamo/deepcode-core";
 import type { ResolvedDeepcodingSettings } from "@vegamo/deepcode-core";
 import { buildSlashCommands, BUILTIN_SLASH_COMMANDS, formatSlashCommandDescription } from "../core/slash-commands";
 import { ThemedGradient } from "./ThemedGradient";
 import { AsciiLogo } from "../ascii-art";
 import { useAppContext } from "../contexts";
+import { formatHomeRelativePath } from "../core/display-path";
+
+export { formatHomeRelativePath } from "../core/display-path";
 
 type WelcomeScreenProps = {
   projectRoot: string;
@@ -96,20 +97,6 @@ function SettingRow({ label, value }: { label: string; value: string }): React.R
       </Box>
     </Box>
   );
-}
-
-export function formatHomeRelativePath(value: string, home = os.homedir()): string {
-  const normalizedValue = path.resolve(value);
-  const normalizedHome = path.resolve(home);
-  const relative = path.relative(normalizedHome, normalizedValue);
-
-  if (relative === "") {
-    return "~";
-  }
-  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
-    return `~${path.sep}${relative}`;
-  }
-  return normalizedValue;
 }
 
 export function buildWelcomeTips(skills: SkillInfo[]): Array<{ label: string; description: string }> {

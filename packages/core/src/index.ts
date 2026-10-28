@@ -185,3 +185,6 @@ export {
   writeDeepcodePlusApiKey,
 } from "./common/plus-subscription";
 export type { PlusSubscriptionStatus, OpenAIConnection, OpenAIConnectionContext } from "./common/plus-subscription";
+
+export { getDiffDetails, getDiffFilePath, parseLegacyDiffPreview } from "./common/diff-preview";
+export type { DiffDetails, DiffLine } from "./common/diff-preview";

@@ -2,7 +2,7 @@ import * as fs from "fs";
 import { z } from "zod";
 import type { ToolExecutionContext, ToolExecutionResult } from "./executor";
 import {
-  buildDiffPreview,
+  buildFileDiff,
   ensureParentDirectory,
   hasFileChangedSinceState,
   normalizeContent,
@@ -105,7 +105,7 @@ export async function handleWriteTool(
         const existingMetadata = existingFile ? readTextFileWithMetadata(filePath) : null;
         const encoding = existingMetadata?.encoding ?? "utf8";
         const lineEndings = existingMetadata?.lineEndings ?? newFileLineEnding(filePath);
-        const diffPreview = buildDiffPreview(filePath, existingMetadata?.content ?? null, normalizedContent);
+        const diff = buildFileDiff(filePath, existingMetadata?.content ?? null, normalizedContent);
         context.signal?.throwIfAborted();
         context.onBeforeFileMutation?.(filePath);
         context.signal?.throwIfAborted();
@@ -151,7 +151,8 @@ export async function handleWriteTool(
                 endLine: snippet.endLine,
               },
             }),
-            diff_preview: diffPreview,
+            diff_preview: diff.preview,
+            diff_details: diff.details,
             ...repairMetadata,
           },
         };
