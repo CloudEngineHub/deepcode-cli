@@ -70,13 +70,21 @@ type View = "chat" | "session-list" | "undo" | "mcp-status";
 
 type AppProps = {
   projectRoot: string;
+  settingsFile?: string;
   initialPrompt?: string;
   resumeSessionId?: string | true;
   forkSessionId?: string;
   onRestart?: () => void;
 };
 
-function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRestart }: AppProps): React.ReactElement {
+function App({
+  projectRoot,
+  settingsFile,
+  initialPrompt,
+  resumeSessionId,
+  forkSessionId,
+  onRestart,
+}: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout, write } = useStdout();
   const terminalTitle = useMemo(() => createTerminalTitle(stdout), [stdout]);
@@ -115,7 +123,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const [isExiting, setIsExiting] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [welcomeNonce, setWelcomeNonce] = useState(0);
-  const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot));
+  const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot, settingsFile));
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
@@ -125,13 +133,16 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   rawModeRef.current = mode;
   messagesRef.current = messages;
 
-  const clientFactory = useMemo(() => createOpenAIClientFactory(projectRoot), [projectRoot]);
+  const clientFactory = useMemo(
+    () => createOpenAIClientFactory(projectRoot, settingsFile),
+    [projectRoot, settingsFile]
+  );
 
   const sessionManager = useMemo(() => {
     return new SessionManager({
       projectRoot,
       createOpenAIClient: clientFactory,
-      getResolvedSettings: () => resolveCurrentSettings(projectRoot),
+      getResolvedSettings: () => resolveCurrentSettings(projectRoot, settingsFile),
       renderMarkdown: (text) => text,
       onAssistantMessage: (message: SessionMessage) => {
         setMessages((prev) => [...prev, message]);
@@ -147,7 +158,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           )
         );
         if (sessionManager.getActiveSessionId() !== entry.id) return;
-        setStatusLine(buildStatusLine(entry, resolveCurrentSettings(projectRoot)));
+        setStatusLine(buildStatusLine(entry, resolveCurrentSettings(projectRoot, settingsFile)));
         setRunningProcesses(entry.processes);
         setActiveStatus(entry.status);
         setActiveAskPermissions(entry.askPermissions);
@@ -181,7 +192,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         buf.set(pid, current + text.slice(0, available));
       },
     });
-  }, [projectRoot, clientFactory]);
+  }, [projectRoot, settingsFile, clientFactory]);
 
   const activeSessionId = sessionManager.getActiveSessionId();
   useEffect(() => {
@@ -303,9 +314,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
    * Initialize MCP servers.
    */
   useLayoutEffect(() => {
-    const settings = resolveCurrentSettings(projectRoot);
+    const settings = resolveCurrentSettings(projectRoot, settingsFile);
     void sessionManager.initMcpServers(settings.mcpServers);
-  }, [projectRoot, sessionManager]);
+  }, [projectRoot, settingsFile, sessionManager]);
 
   /**
    * Dispose the session manager on unmount.
@@ -381,7 +392,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           const changed = await sessionManager.compactSession(sessionId, controller.signal);
           if (compactionControllerRef.current !== controller) return;
           const session = sessionManager.getSession(sessionId);
-          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
+          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot, settingsFile)) : "");
           refreshSessionsList();
           if (!changed) setCommandNotice("Conversation was not compacted.");
         } catch (error) {
@@ -427,7 +438,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           sessionManager.setActiveSessionId(sessionId);
           await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
           const session = sessionManager.getSession(sessionId);
-          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
+          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot, settingsFile)) : "");
           setRunningProcesses(null);
           setActiveStatus(session?.status ?? null);
           setActiveAskPermissions(undefined);
@@ -545,6 +556,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       resetStaticView,
       planMode,
       projectRoot,
+      settingsFile,
     ]
   );
 
@@ -572,19 +584,19 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const handlePermissionSettingsChange = useCallback(
     (target: PermissionSettingsEdit["target"], changes: PermissionSettingsChanges): string => {
       const { changed } = writePermissionSettingsChanges(target, changes, projectRoot);
-      setResolvedSettings(resolveCurrentSettings(projectRoot));
+      setResolvedSettings(resolveCurrentSettings(projectRoot, settingsFile));
       return changed
         ? `Permissions saved (${target === "project" ? "This Project" : "All Projects"})`
         : "Permissions unchanged";
     },
-    [projectRoot]
+    [projectRoot, settingsFile]
   );
 
   const handleModelConfigChange = useCallback(
     (selection: ModelConfigSelection, target: SettingsTarget): string => {
-      const current = resolveCurrentSettings(projectRoot);
+      const current = resolveCurrentSettings(projectRoot, settingsFile);
       const { changed } = writeModelConfigSelection(selection, current, projectRoot, target);
-      const next = resolveCurrentSettings(projectRoot);
+      const next = resolveCurrentSettings(projectRoot, settingsFile);
       setResolvedSettings(next);
 
       if (!changed) {
@@ -626,7 +638,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
 
       return `Model settings updated: ${formatModelConfig(current)} → ${formatModelConfig(next)}`;
     },
-    [projectRoot, sessionManager]
+    [projectRoot, settingsFile, sessionManager]
   );
 
   const handleSubmit = useCallback(
@@ -683,7 +695,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       // Clear first so <Static> resets its index to 0.
       await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
       const session = sessionManager.getSession(sessionId);
-      setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
+      setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot, settingsFile)) : "");
       setRunningProcesses(session?.processes ?? null);
       setActiveStatus(session?.status ?? null);
       setActiveAskPermissions(session?.askPermissions);
@@ -694,7 +706,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       }
       await refreshSkills(sessionId);
     },
-    [sessionManager, resetStaticView, pendingPermissionReply, projectRoot, refreshSkills]
+    [sessionManager, resetStaticView, pendingPermissionReply, projectRoot, settingsFile, refreshSkills]
   );
 
   /**
@@ -895,7 +907,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const screenHeight = useMemo(() => rows ?? stdout?.rows ?? 24, [rows, stdout]);
   const getSessionInfo = useCallback((): SessionInfo | null => {
     const activeSessionId = sessionManager.getActiveSessionId();
-    const settings = resolveCurrentSettings(projectRoot);
+    const settings = resolveCurrentSettings(projectRoot, settingsFile);
     const model = settings.model || "";
     const thinkingEnabled = settings.thinkingEnabled;
     const reasoningEffort = settings.reasoningEffort;
@@ -946,7 +958,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       reasoningEffort,
       toolUsage,
     };
-  }, [sessionManager, projectRoot]);
+  }, [sessionManager, projectRoot, settingsFile]);
   const statusLineSegments = useStatusLine(resolvedSettings.statusline, projectRoot, getSessionInfo);
   const promptHistory = useMemo(() => buildPromptHistory(messages), [messages]);
   const expandedThinkingId = findExpandedThinkingId(messages);
@@ -1156,7 +1168,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           statuses={mcpStatuses}
           onCancel={() => setView("chat")}
           onReconnect={(name) => {
-            const latest = resolveCurrentSettings(projectRoot);
+            const latest = resolveCurrentSettings(projectRoot, settingsFile);
             void sessionManager.reconnectMcpServer(name, latest.mcpServers?.[name]);
           }}
         />

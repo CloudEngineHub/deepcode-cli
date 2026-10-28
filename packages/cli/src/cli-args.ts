@@ -13,6 +13,8 @@ import { isValidSessionId } from "@vegamo/deepcode-core";
 export { isValidSessionId };
 
 export interface ParsedCliArgs {
+  /** Replace the project-level settings input. */
+  settingsFile: string | undefined;
   /** Configure the DeepCode Plus API key and exit. */
   plus: boolean;
   /** Prompt text from -p / --prompt */
@@ -88,6 +90,12 @@ async function configureYargs(argv?: string[]) {
           default: false,
           describe: "Configure your DeepCode Plus API Key",
         })
+        .option("settings", {
+          alias: "s",
+          type: "string",
+          requiresArg: true,
+          describe: "Path to a settings JSON file",
+        })
         .option("prompt", {
           alias: "p",
           type: "string",
@@ -134,7 +142,8 @@ async function configureYargs(argv?: string[]) {
 
           if (
             argv["plus"] === true &&
-            (prompt !== undefined ||
+            (argv["settings"] !== undefined ||
+              prompt !== undefined ||
               hasPositionalQuery ||
               exec ||
               sessionId !== undefined ||
@@ -144,6 +153,10 @@ async function configureYargs(argv?: string[]) {
               argv["last"] === true)
           ) {
             return "--plus must be used on its own.";
+          }
+
+          if (typeof argv["settings"] === "string" && argv["settings"].trim() === "") {
+            return "--settings / -s requires a non-empty file path.";
           }
 
           if (sessionId !== undefined) {
@@ -251,6 +264,7 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
   }
 
   return {
+    settingsFile: parsed.settings as string | undefined,
     plus: parsed.plus === true,
     prompt: parsed.prompt as string | undefined,
     exec: parsed.exec === true,

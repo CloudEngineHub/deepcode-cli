@@ -934,13 +934,41 @@ export function writeModelConfigSelection(
   return { ...result, changed: result.changed || projectChanged };
 }
 
-export function resolveCurrentSettings(projectRoot: string = process.cwd()): ResolvedDeepcodingSettings {
+/** Explicit input files fail loudly; diagnostics must not include JSON contents. */
+function readExplicitSettingsFile(settingsPath: string): DeepcodingSettings {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(settingsPath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "read error";
+    throw new Error(`Cannot read settings file "${settingsPath}" (${code}).`);
+  }
+  let settings: unknown;
+  try {
+    settings = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid JSON in settings file "${settingsPath}".`);
+  }
+  if (!isPlainObject(settings)) {
+    throw new Error(`Settings file "${settingsPath}" must contain a JSON object.`);
+  }
+  return settings as DeepcodingSettings;
+}
+
+export function resolveCurrentSettings(
+  projectRoot: string = process.cwd(),
+  settingsFile?: string
+): ResolvedDeepcodingSettings {
   const userPath = path.resolve(getUserSettingsPath());
-  const projectPath = path.resolve(getProjectSettingsPath(projectRoot));
+  const projectPath =
+    settingsFile === undefined
+      ? path.resolve(getProjectSettingsPath(projectRoot))
+      : path.resolve(projectRoot, settingsFile);
+  const explicitSettings = settingsFile === undefined ? undefined : readExplicitSettingsFile(projectPath);
   const sameFile = userPath === projectPath;
   return resolveSettingsSources(
-    readSettings(),
-    sameFile ? null : readProjectSettings(projectRoot),
+    sameFile && explicitSettings ? explicitSettings : readSettings(),
+    sameFile ? null : (explicitSettings ?? readProjectSettings(projectRoot)),
     {
       model: DEFAULT_MODEL,
       baseURL: DEFAULT_BASE_URL,

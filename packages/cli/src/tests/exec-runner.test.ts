@@ -487,3 +487,22 @@ test("runExecMode disposes resources when stdin cannot be read", async () => {
   assert.match(harness.stderr.join("\n"), /Failed to read stdin: stdin unavailable/);
   assert.equal(harness.disposed, 1);
 });
+
+test("exec uses the selected settings file for startup and subsequent session reads", async () => {
+  const h = createHarness();
+  const reads: unknown[][] = [];
+  h.dependencies.resolveSettings = (...args) => {
+    reads.push(args);
+    return createSettings();
+  };
+  const code = await runExecMode(
+    { prompt: "hello", projectRoot: "/workspace", settingsFile: "/config/custom.json", input: ttyInput() },
+    h.dependencies
+  );
+  assert.equal(code, 0);
+  h.managerOptions!.getResolvedSettings();
+  assert.deepEqual(reads, [
+    ["/workspace", "/config/custom.json"],
+    ["/workspace", "/config/custom.json"],
+  ]);
+});

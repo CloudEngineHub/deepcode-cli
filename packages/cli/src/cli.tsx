@@ -1,8 +1,8 @@
 import { render } from "ink";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { setShellIfWindows, getProjectCode } from "@vegamo/deepcode-core";
+import { setShellIfWindows, getProjectCode, resolveCurrentSettings } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate } from "./common/update-check";
 import { AppContainer } from "./ui";
 import { parseArguments } from "./cli-args";
@@ -29,6 +29,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  const projectRoot = process.cwd();
+  const settingsFile = parsed.settingsFile === undefined ? undefined : resolve(projectRoot, parsed.settingsFile);
+  if (settingsFile !== undefined) {
+    try {
+      resolveCurrentSettings(projectRoot, settingsFile);
+    } catch (error) {
+      writeStderrLine(`deepcode: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   // Configure Windows shell AFTER --version/--help handling.
   // On Windows without Git Bash, setShellIfWindows() throws and calls process.exit(1).
   // If called before argument parsing, --help and --version would fail on those machines.
@@ -37,8 +49,6 @@ async function main(): Promise<void> {
   let initialPrompt = parsed.prompt;
   let resumeSessionId = parsed.resume;
   let forkSessionId = parsed.fork;
-  const projectRoot = process.cwd();
-
   // Resolve --last to the most recent session ID for the current project
   if (parsed.last) {
     const projectCode = getProjectCode(projectRoot);
@@ -80,6 +90,7 @@ async function main(): Promise<void> {
     process.exitCode = await runExecMode({
       prompt: parsed.prompt!,
       projectRoot,
+      settingsFile,
       sessionId: parsed.sessionId,
       json: parsed.json,
       resumeSessionId: typeof resumeSessionId === "string" ? resumeSessionId : undefined,
@@ -145,6 +156,7 @@ async function main(): Promise<void> {
     const inkInstance = render(
       <AppContainer
         projectRoot={projectRoot}
+        settingsFile={settingsFile}
         version={packageInfo?.version ?? CLI_VERSION}
         initialPrompt={appInitialPrompt}
         resumeSessionId={appResumeSessionId}

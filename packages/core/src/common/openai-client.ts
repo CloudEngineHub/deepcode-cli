@@ -27,16 +27,20 @@ const keepAliveAgent = new Agent({ keepAliveTimeout: 180_000 });
 let cachedOpenAI: OpenAI | null = null;
 let cachedOpenAIKey = "";
 
-export function createOpenAIClientFactory(projectRoot: string = process.cwd()): CreateOpenAIClient {
+export function createOpenAIClientFactory(
+  projectRoot: string = process.cwd(),
+  settingsFile?: string
+): CreateOpenAIClient {
   return withPlusSubscription(
-    () => resolveCurrentSettings(projectRoot),
-    (context) => createOpenAIClient(projectRoot, context)
+    () => resolveCurrentSettings(projectRoot, settingsFile),
+    (context) => createOpenAIClient(projectRoot, context, settingsFile)
   );
 }
 
 export function createOpenAIClient(
   projectRoot: string = process.cwd(),
-  context?: OpenAIConnectionContext
+  context?: OpenAIConnectionContext,
+  settingsFile?: string
 ): {
   client: OpenAI | null;
   apiKey?: string;
@@ -55,7 +59,7 @@ export function createOpenAIClient(
   usingPlus: boolean;
   configurationError?: string;
 } {
-  const settings = resolveCurrentSettings(projectRoot);
+  const settings = resolveCurrentSettings(projectRoot, settingsFile);
   const plusSettings = context ? undefined : resolveEffectivePlusSettings(settings);
   const plusApiKey = context ? context.plusApiKey : plusSettings?.apiKey;
   const connection =

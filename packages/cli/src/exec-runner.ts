@@ -32,6 +32,7 @@ interface SignalTarget {
 export interface ExecRunnerOptions {
   prompt: string;
   projectRoot: string;
+  settingsFile?: string;
   sessionId?: string;
   json?: boolean;
   resumeSessionId?: string;
@@ -74,11 +75,11 @@ export async function runExecMode(
 
   deps.signalTarget.on("SIGINT", handleSigint);
   try {
-    const settings = deps.resolveSettings(options.projectRoot);
+    const settings = deps.resolveSettings(options.projectRoot, options.settingsFile);
     manager = deps.createSessionManager({
       projectRoot: options.projectRoot,
-      createOpenAIClient: createOpenAIClientFactory(options.projectRoot),
-      getResolvedSettings: () => deps.resolveSettings(options.projectRoot),
+      createOpenAIClient: createOpenAIClientFactory(options.projectRoot, options.settingsFile),
+      getResolvedSettings: () => deps.resolveSettings(options.projectRoot, options.settingsFile),
       renderMarkdown: (text) => text,
       nonInteractive: true,
       onAssistantMessage: (message, shouldConnect) => {

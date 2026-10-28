@@ -454,3 +454,21 @@ test("parseArguments exits when --last is combined with bare --resume", async ()
     assert.ok(exitSpy.calls.length >= 1);
   });
 });
+
+for (const flag of ["-s", "--settings"]) {
+  test(`parseArguments accepts ${flag} with all session modes`, async () => {
+    for (const mode of [[], ["-x", "-p", "hello"], ["-r"], ["-f"], ["-l"]]) {
+      const parsed = await parseArguments([flag, "config/custom settings.json", ...mode]);
+      assert.equal(parsed.settingsFile, "config/custom settings.json");
+    }
+    assert.equal((await parseArguments([flag, "/tmp/settings.json"])).settingsFile, "/tmp/settings.json");
+    assert.equal((await parseArguments([])).settingsFile, undefined);
+  });
+  for (const args of [[flag], [flag, ""], [flag, "   "], [flag, "--exec"], ["--plus", flag, "settings.json"]]) {
+    test(`parseArguments rejects settings arguments ${JSON.stringify(args)}`, async () => {
+      await withMockedExit(async () => {
+        await assert.rejects(parseArguments(args), /process.exit\(1\)/);
+      });
+    });
+  }
+}
