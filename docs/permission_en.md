@@ -40,9 +40,9 @@ Configure permissions in `~/.deepcode/settings.json` (user-level) or `.deepcode/
 
 You can also enter `/permissions` in the interactive UI to open the permission editor. If the current project already has project-level configuration, the editor changes that configuration; otherwise, it changes user-level configuration. The editor supports:
 
-- Setting the default mode to `allowAll` or `askAll`, which is saved immediately upon selection.
+- Setting the default mode to `allowAll` or `askAll`, then returning to the home menu.
 - Setting each permission scope to allow, deny, ask, or follow the default configuration.
-- Previewing the configuration that actually applies to the current project. Scope changes are saved only when you select **Save**. Pressing `Esc` in the scope list to return to the home menu discards unsaved changes, and pressing `Tab` closes the editor.
+- Previewing the configuration that actually applies to the current project. All changes are saved together by selecting **Save** on the home menu. Pressing `Esc` in a submenu returns to the previous page and keeps your changes; pressing `Esc` on the home menu closes the editor and discards unsaved changes.
 
 For manual configuration, use the `permissions` field:
 

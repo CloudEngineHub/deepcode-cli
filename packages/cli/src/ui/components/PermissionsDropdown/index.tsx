@@ -59,7 +59,7 @@ export default function PermissionsDropdown({
   const [saving, setSaving] = useState(false);
   const scope = PERMISSION_SCOPES[scopeIndex]!;
   const { permissions, effective } = previewPermissionSettings(edit, changes);
-  const currentMode = edit.permissions ? (edit.permissions.defaultMode ?? "allowAll") : effective.defaultMode;
+  const currentMode = permissions ? (permissions.defaultMode ?? "allowAll") : effective.defaultMode;
   const targetLabel = edit.target === "project" ? "Project" : "User";
 
   async function save(nextChanges: PermissionSettingsChanges): Promise<void> {
@@ -80,31 +80,24 @@ export default function PermissionsDropdown({
   if (step === "home") {
     items = [
       { key: "defaultMode", label: "defaultMode", description: currentMode },
-      { key: "scopes", label: "scopes", description: "Set permissions by scope" },
+      { key: "scopes", label: "scopes" },
+      { key: "save", label: "Save" },
     ];
   } else if (step === "defaultMode") {
-    items = MODES.map((mode) => {
-      const next = previewPermissionSettings(edit, { defaultMode: mode }).effective.defaultMode;
-      const description = mode === "askAll" ? "Ask unless a scope has a rule" : "Allow unless a scope has a rule";
-      return {
-        key: mode,
-        label: mode,
-        selected: mode === currentMode,
-        description: next === mode ? description : `${description} · effective: ${next} (Project)`,
-      };
-    });
+    items = MODES.map((mode) => ({ key: mode, label: mode, selected: mode === currentMode }));
   } else if (step === "scopes") {
-    items = [
-      ...PERMISSION_SCOPES.map((item) => ({
-        key: item,
-        label: item,
-        description: describeScopeSetting(edit, changes, item),
-      })),
-      { key: "save", label: "Save", description: "Save changes" },
-    ];
+    items = PERMISSION_SCOPES.map((item) => ({
+      key: item,
+      label: item,
+      description: describeScopeSetting(edit, changes, item),
+    }));
   } else {
     items = DECISIONS.map((decision, index) => {
-      const description = describeScopeSetting(edit, { scopes: { ...changes.scopes, [scope]: decision } }, scope);
+      const description = describeScopeSetting(
+        edit,
+        { ...changes, scopes: { ...changes.scopes, [scope]: decision } },
+        scope
+      );
       const effectiveHint = description.includes(" · ") ? description.slice(description.indexOf(" · ")) : "";
       return {
         key: decision,
@@ -116,10 +109,8 @@ export default function PermissionsDropdown({
   }
 
   useTerminalInput((input, key) => {
-    if (saving || key.paste) return;
-    if (key.tab) {
-      onClose();
-    } else if (key.escape) {
+    if (saving || key.paste || key.tab) return;
+    if (key.escape) {
       setError(null);
       if (step === "home") onClose();
       else if (step === "scope") {
@@ -128,30 +119,31 @@ export default function PermissionsDropdown({
       } else {
         setStep("home");
         setActiveIndex(step === "scopes" ? 1 : 0);
-        setChanges({});
       }
     } else if (key.upArrow || key.downArrow) {
       setActiveIndex((index) => (index + (key.upArrow ? -1 : 1) + items.length) % items.length);
     } else if (!key.ctrl && !key.meta && !key.shift && (key.return || input === " ")) {
       setError(null);
       if (step === "home") {
-        setStep(activeIndex === 0 ? "defaultMode" : "scopes");
-        setActiveIndex(activeIndex === 0 ? MODES.indexOf(currentMode) : 0);
-      } else if (step === "defaultMode") {
-        void save({ defaultMode: MODES[activeIndex]! });
-      } else if (step === "scopes") {
-        if (activeIndex === PERMISSION_SCOPES.length) void save(changes);
+        if (items[activeIndex]!.key === "save") void save(changes);
         else {
-          setScopeIndex(activeIndex);
-          setStep("scope");
-          setActiveIndex(DECISIONS.indexOf(getPermissionScopeSelection(permissions, PERMISSION_SCOPES[activeIndex]!)));
+          setStep(activeIndex === 0 ? "defaultMode" : "scopes");
+          setActiveIndex(activeIndex === 0 ? MODES.indexOf(currentMode) : 0);
         }
+      } else if (step === "defaultMode") {
+        setChanges({ ...changes, defaultMode: MODES[activeIndex]! });
+        setStep("home");
+        setActiveIndex(0);
+      } else if (step === "scopes") {
+        setScopeIndex(activeIndex);
+        setStep("scope");
+        setActiveIndex(DECISIONS.indexOf(getPermissionScopeSelection(permissions, PERMISSION_SCOPES[activeIndex]!)));
       } else {
         const selection = DECISIONS[activeIndex]!;
         const scopes = { ...changes.scopes };
         if (selection === getPermissionScopeSelection(edit.permissions, scope)) delete scopes[scope];
         else scopes[scope] = selection;
-        setChanges({ scopes });
+        setChanges({ ...changes, scopes });
         setStep("scopes");
         setActiveIndex(scopeIndex);
       }
@@ -162,12 +154,13 @@ export default function PermissionsDropdown({
   const helpText = saving
     ? "Saving…"
     : step === "home"
-      ? "↑↓ move · Enter/Space select · Esc/Tab cancel"
-      : step === "defaultMode"
-        ? "↑↓ move · Enter/Space save · Esc back · Tab cancel"
-        : step === "scopes"
-          ? "↑↓ move · Enter/Space select · Save to apply · Esc back (discard) · Tab cancel"
-          : "↑↓ move · Enter/Space select · Esc back · Tab cancel";
+      ? "↑↓ move · Enter/Space select · Esc cancel"
+      : "↑↓ move · Enter/Space select · Esc back";
+  const labelWidth = Math.min(
+    Math.max(...items.map((item) => item.label.length + (item.selected === undefined ? 2 : 4))),
+    Math.max(1, width - 4)
+  );
+  const showDescriptions = width - 4 - labelWidth > 2;
   return (
     <Box flexDirection="column" width={width}>
       <DropdownMenu
@@ -175,16 +168,24 @@ export default function PermissionsDropdown({
         width={width}
         items={items}
         activeIndex={activeIndex}
-        maxVisible={Math.max(1, Math.min(8, Math.floor((rows - 10) / (width < 60 ? 4 : 2))))}
+        maxVisible={step === "home" ? items.length : Math.max(1, Math.min(8, rows - 10))}
         helpText={helpText}
         renderItem={(item, active) => (
-          <Box paddingX={1} flexDirection="column">
-            <Text color={active ? "#229ac3" : undefined}>
-              {active ? "> " : "  "}
-              {item.selected === undefined ? "" : item.selected ? "● " : "○ "}
-              {item.label}
-            </Text>
-            {item.description ? <Text dimColor>{`  ${item.description}`}</Text> : null}
+          <Box paddingX={1} gap={showDescriptions ? 2 : 0}>
+            <Box width={labelWidth} flexShrink={0}>
+              <Text color={active ? "#229ac3" : undefined} wrap="truncate-end">
+                {active ? "> " : "  "}
+                {item.selected === undefined ? "" : item.selected ? "● " : "○ "}
+                {item.label}
+              </Text>
+            </Box>
+            {showDescriptions && item.description ? (
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text dimColor wrap="truncate-end">
+                  {item.description}
+                </Text>
+              </Box>
+            ) : null}
           </Box>
         )}
       />
