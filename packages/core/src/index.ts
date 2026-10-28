@@ -168,6 +168,7 @@ export type {
   BashPermissionScope,
   MessageToolPermission,
   PermissionDecision,
+  PermissionReply,
   PermissionToolCall,
   UserToolPermission,
 } from "./common/permissions";

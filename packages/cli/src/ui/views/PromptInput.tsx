@@ -68,7 +68,6 @@ import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import {
   readPermissionSettingsEdit,
   type ModelConfigSelection,
-  type PermissionScope,
   type PermissionSettingsEdit,
   type PermissionSettingsChanges,
 } from "@vegamo/deepcode-core";
@@ -76,15 +75,13 @@ import PermissionsDropdown from "../components/PermissionsDropdown";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
 import { RawMode } from "../contexts";
 import type { SkillInfo } from "@vegamo/deepcode-core";
-import type { UserToolPermission } from "@vegamo/deepcode-core";
+import type { PermissionReply } from "@vegamo/deepcode-core";
 import type { StatusSegment } from "../statusline";
 
-export type PromptSubmission = {
+export type PromptSubmission = PermissionReply & {
   text: string;
   imageUrls: string[];
   selectedSkills?: SkillInfo[];
-  permissions?: UserToolPermission[];
-  alwaysAllows?: PermissionScope[];
   planMode?: boolean;
   isAnswers?: boolean;
   command?: "new" | "resume" | "fork" | "continue" | "compact" | "undo" | "mcp" | "exit";

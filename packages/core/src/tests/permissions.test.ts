@@ -671,3 +671,61 @@ function createTempDir(prefix: string, parentDir = os.tmpdir()): string {
   tempDirs.push(dir);
   return dir;
 }
+
+test("session grants override ask and Plan forced scopes, preserve deny, and leave other scopes pending", () => {
+  const settings: Required<PermissionSettings> = {
+    allow: [],
+    deny: ["write-out-cwd"],
+    ask: ["write-in-cwd"],
+    defaultMode: "askAll",
+    addWorkingDirs: [],
+  };
+  const before = structuredClone(settings);
+  const options = {
+    sessionId: "session-grants",
+    projectRoot: "/project",
+    settings,
+    sessionAllows: new Set<PermissionScope>(["write-in-cwd", "write-out-cwd"]),
+    forceAskScopes: ["write-in-cwd", "write-out-cwd"] as PermissionScope[],
+    toolCalls: [
+      {
+        id: "allowed",
+        type: "function",
+        function: { name: "Write", arguments: JSON.stringify({ file_path: "/project/a" }) },
+      },
+      {
+        id: "denied",
+        type: "function",
+        function: { name: "Write", arguments: JSON.stringify({ file_path: "/outside/a" }) },
+      },
+      {
+        id: "mixed",
+        type: "function",
+        function: {
+          name: "Bash",
+          arguments: JSON.stringify({ command: "example", sideEffects: ["write-in-cwd", "network"] }),
+        },
+      },
+      {
+        id: "unknown",
+        type: "function",
+        function: { name: "Bash", arguments: JSON.stringify({ command: "example" }) },
+      },
+    ],
+  };
+  const plan = computeToolCallPermissions(options);
+  assert.deepEqual(plan.permissions, [
+    { toolCallId: "allowed", permission: "allow" },
+    { toolCallId: "denied", permission: "deny" },
+    { toolCallId: "mixed", permission: "ask" },
+    { toolCallId: "unknown", permission: "ask" },
+  ]);
+  assert.deepEqual(
+    plan.askPermissions.map(({ scopes }) => scopes),
+    [["network"], ["unknown"]]
+  );
+  assert.deepEqual(settings, before);
+  assert.equal(computeToolCallPermissions({ ...options, sessionAllows: new Set() }).permissions[0]?.permission, "ask");
+  assert.equal(hasUserPermissionReplies({ sessionAllows: ["network"] }), true);
+  assert.equal(hasUserPermissionReplies({ sessionAllows: [] }), false);
+});

@@ -15,6 +15,12 @@ export type UserToolPermission = {
   permission: "allow" | "deny";
 };
 
+export type PermissionReply = {
+  permissions?: UserToolPermission[];
+  alwaysAllows?: PermissionScope[];
+  sessionAllows?: PermissionScope[];
+};
+
 export type MessageToolPermission = {
   toolCallId: string;
   permission: PermissionDecision;
@@ -64,6 +70,7 @@ export type ComputeToolCallPermissionsOptions = {
   toolCalls: unknown[];
   settings?: PermissionPolicySettings;
   forceAskScopes?: readonly PermissionScope[];
+  sessionAllows?: ReadonlySet<PermissionScope>;
   readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
 };
@@ -168,18 +175,17 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
       readPermissionExemptPaths: options.readPermissionExemptPaths,
       resolveSnippetPath: options.resolveSnippetPath,
     });
-    const evaluatedPermission = evaluatePermissionScopes(request.scopes, options.settings);
+    // Granted scopes need no further approval; explicit denies and unknown effects still apply.
+    const scopes = request.scopes.filter(
+      (scope) => scope === "unknown" || !options.sessionAllows?.has(scope) || options.settings?.deny.includes(scope)
+    );
+    const evaluatedPermission = evaluatePermissionScopes(scopes, options.settings);
     const forcedAskScopes =
-      evaluatedPermission === "deny"
-        ? []
-        : getAllowedForcedAskScopes(request.scopes, options.settings, options.forceAskScopes);
+      evaluatedPermission === "deny" ? [] : getAllowedForcedAskScopes(scopes, options.settings, options.forceAskScopes);
     const permission = forcedAskScopes.length > 0 ? "ask" : evaluatedPermission;
     permissions.push({ toolCallId: toolCall.id, permission });
     if (permission === "ask") {
-      const askScopes = mergeAskScopes(
-        getPermissionScopesRequiringAsk(request.scopes, options.settings),
-        forcedAskScopes
-      );
+      const askScopes = mergeAskScopes(getPermissionScopesRequiringAsk(scopes, options.settings), forcedAskScopes);
       askPermissions.push({
         toolCallId: toolCall.id,
         scopes: askScopes.length > 0 ? askScopes : request.scopes,
@@ -489,10 +495,15 @@ export function isPathInAnyDirectory(
   return false;
 }
 
-export function hasUserPermissionReplies(value: { permissions?: unknown; alwaysAllows?: unknown }): boolean {
+export function hasUserPermissionReplies(value: {
+  permissions?: unknown;
+  alwaysAllows?: unknown;
+  sessionAllows?: unknown;
+}): boolean {
   return Boolean(
     (Array.isArray(value.permissions) && value.permissions.length > 0) ||
-    (Array.isArray(value.alwaysAllows) && value.alwaysAllows.length > 0)
+    (Array.isArray(value.alwaysAllows) && value.alwaysAllows.length > 0) ||
+    (Array.isArray(value.sessionAllows) && value.sessionAllows.length > 0)
   );
 }
 

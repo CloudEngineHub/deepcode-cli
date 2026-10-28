@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
 import { createOpenAIClientFactory } from "@vegamo/deepcode-core";
-import type { PermissionScope, PermissionSettingsEdit, PermissionSettingsChanges } from "@vegamo/deepcode-core";
+import type { PermissionSettingsEdit, PermissionSettingsChanges } from "@vegamo/deepcode-core";
 import { type ModelConfigSelection } from "@vegamo/deepcode-core";
 import { type PromptDraft, PromptInput, type PromptSubmission } from "./PromptInput";
 import { MessageView, RawModeExitPrompt } from "../components";
@@ -109,8 +109,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const [activeAskPermissions, setActiveAskPermissions] = useState<SessionEntry["askPermissions"]>(undefined);
   const [pendingPermissionReply, setPendingPermissionReply] = useState<{
     sessionId: string;
-    permissions: PermissionPromptResult["permissions"];
-    alwaysAllows: PermissionScope[];
+    result: PermissionPromptResult;
   } | null>(null);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [isExiting, setIsExiting] = useState(false);
@@ -464,23 +463,21 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         return;
       }
 
+      const activeSessionId = sessionManager.getActiveSessionId();
+      const permissionReply =
+        pendingPermissionReply?.sessionId === activeSessionId ? pendingPermissionReply.result : null;
+      const { permissions, alwaysAllows, sessionAllows } = permissionReply ?? submission;
       const prompt: UserPromptContent = {
         text: submission.text,
         imageUrls: submission.imageUrls,
         skills:
           submission.selectedSkills && submission.selectedSkills.length > 0 ? submission.selectedSkills : undefined,
-        permissions: submission.permissions,
-        alwaysAllows: submission.alwaysAllows,
+        permissions,
+        alwaysAllows,
+        sessionAllows,
         planMode: submission.planMode ?? planMode,
         isAnswers: submission.isAnswers,
       };
-      const activeSessionId = sessionManager.getActiveSessionId();
-      const permissionReply =
-        pendingPermissionReply && activeSessionId === pendingPermissionReply.sessionId ? pendingPermissionReply : null;
-      if (permissionReply) {
-        prompt.permissions = permissionReply.permissions;
-        prompt.alwaysAllows = permissionReply.alwaysAllows;
-      }
 
       const trimmedText = (submission.text ?? "").trim();
       const selectedSkillNames = submission.selectedSkills?.map((skill) => skill.name).filter(Boolean) ?? [];
@@ -1048,12 +1045,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         return;
       }
       setPromptDraft(null);
-      if (result.hasDeny) {
-        setPendingPermissionReply({
-          sessionId,
-          permissions: result.permissions,
-          alwaysAllows: result.alwaysAllows,
-        });
+      if (result.permissions.some(({ permission }) => permission === "deny")) {
+        setPendingPermissionReply({ sessionId, result });
         setStatusLine("Permission denied. Add a reply, then press Enter to continue.");
         sessionManager.denySessionPermission(sessionId);
         return;
@@ -1062,8 +1055,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         text: "/continue",
         imageUrls: [],
         command: "continue",
-        permissions: result.permissions,
-        alwaysAllows: result.alwaysAllows,
+        ...result,
       });
     },
     [handlePrompt, sessionManager]
@@ -1174,7 +1166,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         !pendingPermissionReply &&
         !busy ? (
         <PermissionPrompt
+          key={sessionManager.getActiveSessionId()}
           requests={activeAskPermissions}
+          planMode={sessionManager.getSession(sessionManager.getActiveSessionId() ?? "")?.planMode === true}
           onSubmit={handlePermissionResult}
           onCancel={handlePermissionCancel}
         />

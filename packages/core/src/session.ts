@@ -42,6 +42,7 @@ import {
   DEFAULT_FILE_REFRESH_MARGIN_SECONDS,
   DEFAULT_FILES_API_TIMEOUT_MS,
   DEFAULT_MAX_REQUEST_FILES_BYTES,
+  PERMISSION_SCOPES,
   getDefaultAutoCompactWindow,
   getDefaultContextWindow,
   type McpServerConfig,
@@ -63,6 +64,7 @@ import {
   parseToolCallForPermissions,
   type AskPermissionRequest,
   type MessageToolPermission,
+  type PermissionReply,
   type PermissionToolCall,
   type UserToolPermission,
 } from "./common/permissions";
@@ -354,12 +356,10 @@ export type UndoTarget = {
   canRestoreCode: boolean;
 };
 
-export type UserPromptContent = {
+export type UserPromptContent = PermissionReply & {
   text?: string;
   imageUrls?: string[];
   skills?: SkillInfo[];
-  permissions?: UserToolPermission[];
-  alwaysAllows?: PermissionScope[];
   planMode?: boolean;
   isAnswers?: boolean;
 };
@@ -459,6 +459,7 @@ export class SessionManager {
   private activeSessionId: string | null = null;
   private activePromptController: AbortController | null = null;
   private readonly sessionControllers = new Map<string, AbortController>();
+  private readonly sessionPermissionAllows = new Map<string, Set<PermissionScope>>();
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
   private readonly toolExecutor: ToolExecutor;
@@ -536,6 +537,7 @@ export class SessionManager {
     }
     this.killLiveProcesses();
     this.sessionControllers.clear();
+    this.sessionPermissionAllows.clear();
     this.processTimeoutControls.clear();
     this.mcpManager.disconnect();
     this.requestUsageAnchors.clear();
@@ -1643,9 +1645,7 @@ ${agentInstructions}
       usingPlus: this.createOpenAIClient().usingPlus === true,
     }));
     userPrompt = this.preparePromptImages(sessionId, userPrompt);
-    appendProjectPermissionAllows(this.projectRoot, userPrompt.alwaysAllows, {
-      inheritedPermissions: this.getResolvedSettings().permissions,
-    });
+    this.applyPermissionGrants(sessionId, userPrompt);
     const now = new Date().toISOString();
     const previousPlanMode = Boolean(this.getSession(sessionId)?.planMode);
     const nextPlanMode = Boolean(userPrompt.planMode);
@@ -1707,6 +1707,18 @@ ${agentInstructions}
     );
     this.activeSessionId = sessionId;
     await this.activateSession(sessionId, controller);
+  }
+
+  private applyPermissionGrants(sessionId: string, reply: PermissionReply): void {
+    appendProjectPermissionAllows(this.projectRoot, reply.alwaysAllows, {
+      inheritedPermissions: this.getResolvedSettings().permissions,
+    });
+    if (!reply.sessionAllows?.length) return;
+    const grants = this.sessionPermissionAllows.get(sessionId) ?? new Set<PermissionScope>();
+    for (const scope of reply.sessionAllows) {
+      if (PERMISSION_SCOPES.includes(scope)) grants.add(scope);
+    }
+    if (grants.size) this.sessionPermissionAllows.set(sessionId, grants);
   }
 
   private isContinuePrompt(userPrompt: UserPromptContent): boolean {
@@ -1831,6 +1843,7 @@ ${agentInstructions}
               toolCalls,
               settings: this.getResolvedSettings().permissions,
               forceAskScopes: this.getSession(sessionId)?.planMode ? PLAN_MODE_FORCE_ASK_SCOPES : undefined,
+              sessionAllows: this.sessionPermissionAllows.get(sessionId),
               readPermissionExemptPaths: this.getReadPermissionExemptPaths(sessionId),
               resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
             })
@@ -2952,6 +2965,7 @@ ${agentInstructions}
     }
 
     this.requestUsageAnchors.delete(sessionId);
+    this.sessionPermissionAllows.delete(sessionId);
     clearSessionState(sessionId);
     clearSessionWorkingDir(sessionId);
     const controller = this.sessionControllers.get(sessionId);
@@ -3449,6 +3463,7 @@ ${agentInstructions}
   }
 
   private cloneUserPromptForMeta(prompt: UserPromptContent): UserPromptContent {
+    // Session grants are deliberately excluded: restoring history must not restore authorization.
     return {
       text: prompt.text,
       imageUrls: prompt.imageUrls ? [...prompt.imageUrls] : undefined,
