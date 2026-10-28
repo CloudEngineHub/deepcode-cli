@@ -307,3 +307,11 @@ Configure PLUS separately in `~/.deepcode-plus/settings.json`:
 - `off`: Always use the regular connection without checking the subscription.
 
 You can also set `env.PLUS_API_KEY` in user-level or project-level `settings.json`. The built-in image and video generation skills still read only the separate Plus settings file. The CLI also supports `deepcode --plus`, which prompts you to enter your DeepCode Plus API Key. After successful verification, the key is saved to `~/.deepcode-plus/settings.json`.
+
+## Configuration diagnostics
+
+Run `deepcode --doctor` to check configuration, API access, and the installation environment. Use `deepcode --doctor -s ./settings.json` to diagnose a specific settings file.
+
+The report lists configuration paths, load status, effective values, and their sources, including DeepCode Plus settings. Keys and custom environment values are hidden. Diagnostics do not change settings or install updates.
+
+Results use `PASS`, `WARN`, `FAIL`, and `SKIP`. The exit code is 1 if any check fails, otherwise 0; warnings can still mean a check could not be completed. The command works without a TTY and cannot be combined with `--json` or conversation options.

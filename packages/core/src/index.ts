@@ -45,6 +45,7 @@ export type {
   DeepcodePlusSettings,
   SubscriptionPlan,
   DeepcodingSettings,
+  SettingsTrace,
   ResolvedDeepcodingSettings,
   ModelConfigSelection,
   SettingsTarget,

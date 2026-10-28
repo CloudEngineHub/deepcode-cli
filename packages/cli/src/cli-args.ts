@@ -8,7 +8,7 @@ import Yargs from "yargs";
 import { getCliVersion } from "./utils/version";
 import { writeStderrLine } from "./utils/stdio-helpers";
 import { hideBin } from "yargs/helpers";
-import { isValidSessionId } from "@vegamo/deepcode-core";
+import { isValidSessionId } from "@vegamo/deepcode-core/common/session-id";
 
 export { isValidSessionId };
 
@@ -17,6 +17,8 @@ export interface ParsedCliArgs {
   settingsFile: string | undefined;
   /** Configure the DeepCode Plus API key and exit. */
   plus: boolean;
+  /** Diagnose installation, configuration, and API access. */
+  doctor: boolean;
   /** Prompt text from -p / --prompt */
   prompt: string | undefined;
   /** Run one prompt without starting the interactive TUI. */
@@ -85,6 +87,11 @@ async function configureYargs(argv?: string[]) {
     .usage("Usage: $0 [options] [command]\n\nDeep Code - Launch the interactive CLI or run one prompt with --exec")
     .command("$0 [query..]", "Launch Deep Code CLI", (yargsInstance: Argv) =>
       yargsInstance
+        .option("doctor", {
+          type: "boolean",
+          default: false,
+          describe: "Check configuration, API access, and installation",
+        })
         .option("plus", {
           type: "boolean",
           default: false,
@@ -139,6 +146,20 @@ async function configureYargs(argv?: string[]) {
           const prompt = argv["prompt"] as string | undefined;
           const exec = argv["exec"] === true;
           const sessionId = argv["session-id"] as string | undefined;
+
+          if (
+            argv["doctor"] === true &&
+            (argv["plus"] === true ||
+              prompt !== undefined ||
+              hasPositionalQuery ||
+              exec ||
+              sessionId !== undefined ||
+              argv["json"] === true ||
+              argv["resume"] !== undefined ||
+              argv["fork"] !== undefined ||
+              argv["last"] === true)
+          )
+            return "--doctor can only be combined with --settings / -s.";
 
           if (
             argv["plus"] === true &&
@@ -208,6 +229,7 @@ async function configureYargs(argv?: string[]) {
         })
     )
     .example("deepcode", "Launch the interactive TUI in the current directory")
+    .example("deepcode --doctor", "Diagnose configuration, API access, and installation")
     .example("deepcode --plus", "Configure your DeepCode Plus API Key")
     .example("deepcode -p <prompt>", "Launch the TUI and submit a prompt")
     .example("deepcode -x -p <prompt>", "Run one prompt without launching the TUI")
@@ -266,6 +288,7 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
   return {
     settingsFile: parsed.settings as string | undefined,
     plus: parsed.plus === true,
+    doctor: parsed.doctor === true,
     prompt: parsed.prompt as string | undefined,
     exec: parsed.exec === true,
     sessionId: (parsed["session-id"] as string | undefined)?.toLowerCase(),

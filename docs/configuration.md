@@ -308,3 +308,11 @@ PLUS 独立配置文件为 `~/.deepcode-plus/settings.json`：
 - `off`：固定使用普通通道，不执行订阅检查。
 
 也可以在用户级或项目级 `settings.json` 的 `env.PLUS_API_KEY` 中配置 Key。内置图片、视频生成 Skill 仍只读取独立 Plus 配置。CLI也支持运行 `deepcode --plus`，按提示输入 DeepCode Plus API Key。验证通过后，Key 会保存到 `~/.deepcode-plus/settings.json`。
+
+## 配置诊断
+
+运行 `deepcode --doctor` 检查配置、API 连接和安装环境；使用 `deepcode --doctor -s ./settings.json` 检查指定的配置文件。
+
+报告列出配置文件路径、加载状态、最终值及其来源，并覆盖 DeepCode Plus 配置。密钥和自定义环境变量值不会显示。诊断不修改配置或执行更新。
+
+输出包含 `PASS`、`WARN`、`FAIL` 和 `SKIP`。有 `FAIL` 时退出码为 1，否则为 0；只有警告不代表所有检查均已通过。命令可在非交互终端运行，不支持与 `--json` 或会话参数组合。
