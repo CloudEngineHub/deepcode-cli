@@ -4,6 +4,7 @@ export type MessageViewProps = {
   message: SessionMessage;
   collapsed?: boolean;
   width?: number;
+  projectRoot?: string;
 };
 export type ToolSummary = {
   name: string;
@@ -14,6 +15,7 @@ export type ToolSummary = {
 
 export type DiffPreviewLine = {
   marker: string;
+  lineNumber: number | null;
   content: string;
   kind: "added" | "removed" | "context";
 };

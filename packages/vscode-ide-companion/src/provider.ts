@@ -4,6 +4,7 @@
  */
 import type { SessionManager } from "@vegamo/deepcode-core";
 import type { PermissionScope, SkillInfo, UserToolPermission } from "@vegamo/deepcode-core";
+import { prepareToolDiffContent } from "./tool-diff.js";
 import { parseUserToolPermissions, parsePermissionScopes } from "./utils.js";
 
 export interface PostMessageFn {
@@ -188,7 +189,7 @@ export function loadSession(
       .filter((m) => m.visible)
       .map((m) => ({
         role: m.role,
-        content: m.content,
+        content: prepareToolDiffContent(m.role, m.content),
         html:
           m.role !== "tool" && (m.role !== "user" || m.meta?.isAnswers)
             ? renderMarkdown(

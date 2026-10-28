@@ -25,6 +25,7 @@ import {
 import { getNonce, isAllowedExternalUrl } from "./utils.js";
 import { handleWebviewMessage } from "./provider.js";
 import { createSharpLoader } from "./sharp-loader.js";
+import { prepareToolDiffContent } from "./tool-diff.js";
 
 const DEFAULT_MODEL = "deepseek-v4-pro";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -90,7 +91,11 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
           const reasoningContent = (message.messageParams as ReasoningMessageParams | null)?.reasoning_content;
           message.html = this.md.render(message.content || reasoningContent || "");
         }
-        this.webviewView.webview.postMessage({ type: "appendMessage", message, shouldConnect });
+        this.webviewView.webview.postMessage({
+          type: "appendMessage",
+          message: { ...message, content: prepareToolDiffContent(message.role, message.content) },
+          shouldConnect,
+        });
       },
       onSessionEntryUpdated: (entry) => {
         if (!this.webviewView) {
@@ -237,7 +242,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         .filter((m) => m.visible)
         .map((m) => ({
           role: m.role,
-          content: m.content,
+          content: prepareToolDiffContent(m.role, m.content),
           html:
             m.role !== "tool"
               ? this.md.render(m.content || (m.messageParams as ReasoningMessageParams | null)?.reasoning_content || "")
@@ -584,7 +589,10 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     html = html.replace(/\{\{attachmentsJsUri\}\}/g, attachmentsJsUri.toString());
     html = html.replace(/\{\{thinkingPreviewJsUri\}\}/g, thinkingPreviewJsUri.toString());
     html = html.replace(/\{\{iconUri\}\}/g, iconUri.toString());
-    html = html.replace(/\{\{workspaceRoot\}\}/g, JSON.stringify(this.getWorkspaceRoot()));
+    html = html.replace(/\{\{workspaceRoot\}\}/g, () =>
+      JSON.stringify(this.getWorkspaceRoot()).replace(/</g, "\\u003c")
+    );
+    html = html.replace(/\{\{userHome\}\}/g, () => JSON.stringify(os.homedir()).replace(/</g, "\\u003c"));
 
     return html;
   }

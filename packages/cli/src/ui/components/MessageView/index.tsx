@@ -1,3 +1,5 @@
+import { getDiffDetails, getDiffFilePath } from "@vegamo/deepcode-core";
+import { formatDisplayPath } from "../../core/display-path";
 import React from "react";
 import { Box, Text } from "ink";
 import { renderMarkdown, renderMarkdownSegments } from "./markdown";
@@ -15,7 +17,12 @@ import { RawMode, useRawModeContext } from "../../contexts";
 const PROMPT_ECHO_PREFIX_WIDTH = 2;
 const PROMPT_ECHO_MARGIN_LEFT = 1;
 
-export function MessageView({ message, collapsed, width = 80 }: MessageViewProps): React.ReactElement | null {
+export function MessageView({
+  message,
+  collapsed,
+  width = 80,
+  projectRoot = process.cwd(),
+}: MessageViewProps): React.ReactElement | null {
   const { mode } = useRawModeContext();
   if (!message.visible) {
     return null;
@@ -97,6 +104,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
   if (message.role === "tool") {
     const summary = buildToolSummary(message);
     const diffLines = getToolDiffPreviewLines(summary);
+    const diff = getDiffDetails(summary.metadata);
     const planLines = getUpdatePlanPreviewLines(summary);
     return (
       <Box flexDirection="column" marginLeft={1} marginBottom={1} marginY={0}>
@@ -104,9 +112,16 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
           width={width}
           bulletColor={summary.ok ? "green" : "red"}
           name={formatStatusName(summary.name)}
-          params={formatToolStatusParams(summary)}
+          params={formatToolStatusParams(summary, projectRoot)}
         />
-        {diffLines.length > 0 ? <DiffPreview lines={diffLines} /> : null}
+        {diff && diffLines.length > 0 ? (
+          <DiffPreview
+            lines={diffLines}
+            filePath={formatDisplayPath(getDiffFilePath(summary.metadata), projectRoot)}
+            added={diff.added}
+            removed={diff.removed}
+          />
+        ) : null}
         {planLines.length > 0 ? <PlanPreview lines={planLines} /> : null}
       </Box>
     );
@@ -200,15 +215,30 @@ function StatusLine({
   );
 }
 
-function DiffPreview({ lines }: { lines: DiffPreviewLine[] }): React.ReactElement {
+function DiffPreview({
+  lines,
+  filePath,
+  added,
+  removed,
+}: {
+  lines: DiffPreviewLine[];
+  filePath: string;
+  added: number;
+  removed: number;
+}): React.ReactElement {
+  const numberWidth = Math.max(1, ...lines.map((line) => String(line.lineNumber ?? "").length));
   return (
     <Box flexDirection="column" marginLeft={2}>
-      <Text dimColor>└ Changes</Text>
+      <Text wrap="truncate-middle">
+        <Text dimColor>{`└ ${filePath} · `}</Text>
+        <Text color="green">{`+${added}`}</Text> <Text color="red">{`-${removed}`}</Text>
+      </Text>
       <Box flexDirection="column" marginLeft={2}>
         {lines.map((line, index) => (
           <Text key={`${index}-${line.marker}-${line.content}`} wrap="truncate-end">
+            <Text color="gray">{`${String(line.lineNumber ?? "").padStart(numberWidth)} `}</Text>
             <Text color={line.kind === "added" ? "green" : line.kind === "removed" ? "red" : "gray"}>
-              {line.marker}
+              {`${line.marker} `}
             </Text>
             <Text color={line.kind === "added" ? "green" : line.kind === "removed" ? "red" : undefined}>
               {line.content}

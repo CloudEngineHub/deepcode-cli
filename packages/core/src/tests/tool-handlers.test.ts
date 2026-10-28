@@ -497,6 +497,16 @@ test("Read returns snippet metadata and Edit can scope replacements by snippet_i
   assert.equal(editResult.metadata?.cache_refreshed, true);
   assert.equal(editResult.metadata?.line_endings, "LF");
   assert.match(String(editResult.metadata?.diff_preview ?? ""), /\+target = 2/);
+  assert.deepEqual(editResult.metadata?.diff_details, {
+    added: 1,
+    removed: 1,
+    lines: [
+      { kind: "context", content: "beta", lineNumber: 4 },
+      { kind: "removed", content: "target = 1", lineNumber: 5 },
+      { kind: "added", content: "target = 2", lineNumber: 5 },
+      { kind: "context", content: "done", lineNumber: 6 },
+    ],
+  });
   assert.equal(
     fs.readFileSync(filePath, "utf8"),
     ["alpha", "target = 1", "omega", "beta", "target = 2", "done"].join("\n")

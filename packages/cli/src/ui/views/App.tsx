@@ -1097,6 +1097,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
             <MessageView
               key={item.id}
               message={item}
+              projectRoot={projectRoot}
               collapsed={isCollapsedThinking(item, expandedThinkingId)}
               width={screenWidth}
             />

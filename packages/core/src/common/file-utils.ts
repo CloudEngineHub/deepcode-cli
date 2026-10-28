@@ -1,3 +1,4 @@
+import type { DiffDetails, DiffLine } from "./diff-preview";
 import childProcess from "node:child_process";
 import * as fs from "fs";
 import * as os from "os";
@@ -101,17 +102,17 @@ export function hasFileChangedSinceState(filePath: string, state: FileState): bo
   return !(isFullRead && current.content === state.content);
 }
 
-export function buildDiffPreview(
+export function buildFileDiff(
   filePath: string,
   originalContent: string | null,
   updatedContent: string,
   maxLines = 40
-): string | null {
+): { preview: string | null; details: DiffDetails | null } {
   const original = originalContent === null ? null : normalizeContent(originalContent);
   const updated = normalizeContent(updatedContent);
 
   if (original !== null && original === updated) {
-    return null;
+    return { preview: null, details: null };
   }
 
   const oldLines = toDiffLines(original);
@@ -142,27 +143,40 @@ export function buildDiffPreview(
     `@@ -${oldStart},${oldChanged.length} +${newStart},${newChanged.length} @@`,
   ];
 
+  const lines: DiffLine[] = [];
   if (prefix > 0) {
+    lines.push({ kind: "context", content: oldLines[prefix - 1], lineNumber: prefix });
     previewLines.push(` ${oldLines[prefix - 1]}`);
   }
 
-  for (const line of oldChanged) {
+  oldChanged.forEach((line, index) => {
     previewLines.push(`-${line}`);
-  }
+    lines.push({ kind: "removed", content: line, lineNumber: prefix + index + 1 });
+  });
 
-  for (const line of newChanged) {
+  newChanged.forEach((line, index) => {
     previewLines.push(`+${line}`);
-  }
+    lines.push({ kind: "added", content: line, lineNumber: prefix + index + 1 });
+  });
 
   if (suffix > 0) {
+    lines.push({
+      kind: "context",
+      content: oldLines[oldLines.length - suffix],
+      lineNumber: newLines.length - suffix + 1,
+    });
     previewLines.push(` ${oldLines[oldLines.length - suffix]}`);
   }
 
-  if (previewLines.length > maxLines) {
-    return `${previewLines.slice(0, maxLines).join("\n")}\n...`;
+  const truncated = previewLines.length > maxLines;
+  const visibleLines = truncated ? lines.slice(0, Math.max(0, maxLines - 3)) : lines;
+  if (truncated) {
+    visibleLines.push({ kind: "context", content: "...", lineNumber: null });
   }
-
-  return previewLines.join("\n");
+  return {
+    preview: truncated ? `${previewLines.slice(0, maxLines).join("\n")}\n...` : previewLines.join("\n"),
+    details: { added: newChanged.length, removed: oldChanged.length, lines: visibleLines },
+  };
 }
 
 function toDiffLines(content: string | null): string[] {
@@ -175,4 +189,13 @@ function toDiffLines(content: string | null): string[] {
     lines.pop();
   }
   return lines;
+}
+
+export function buildDiffPreview(
+  filePath: string,
+  originalContent: string | null,
+  updatedContent: string,
+  maxLines = 40
+): string | null {
+  return buildFileDiff(filePath, originalContent, updatedContent, maxLines).preview;
 }

@@ -610,7 +610,7 @@ body {
 
 .diff-line {
   display: grid;
-  grid-template-columns: 20px 1fr;
+  grid-template-columns: calc(var(--diff-number-width, 1ch) + 12px) 20px minmax(0, 1fr);
   gap: 0;
   font-family: var(--vscode-editor-font-family);
   font-size: 12px;
@@ -1674,4 +1674,27 @@ textarea::placeholder {
 .bubble a {
   overflow-wrap: break-word;
   word-break: break-all;
+}
+
+.diff-heading {
+  overflow-wrap: anywhere;
+}
+
+.diff-line-number {
+  color: var(--vscode-descriptionForeground, #808080);
+  text-align: right;
+  padding: 1px 6px;
+  user-select: none;
+}
+
+.diff-added-count,
+.diff-line.added .diff-line-marker,
+.diff-line.added .diff-line-content {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+
+.diff-removed-count,
+.diff-line.removed .diff-line-marker,
+.diff-line.removed .diff-line-content {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
 }

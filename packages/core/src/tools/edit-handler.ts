@@ -3,12 +3,7 @@ import { z } from "zod";
 import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
 import { buildThinkingRequestOptions } from "../common/openai-thinking";
 import type { ToolExecutionContext, ToolExecutionResult } from "./executor";
-import {
-  buildDiffPreview,
-  hasFileChangedSinceState,
-  readTextFileWithMetadata,
-  writeTextFile,
-} from "../common/file-utils";
+import { buildFileDiff, hasFileChangedSinceState, readTextFileWithMetadata, writeTextFile } from "../common/file-utils";
 import { executeValidatedTool, semanticBoolean } from "../common/validate";
 import {
   createSnippet,
@@ -308,7 +303,7 @@ export async function handleEditTool(
         }
 
         const updated = applyReplacement(raw, replacementOldString, replacementNewString, matches, replaceAll);
-        const diffPreview = buildDiffPreview(filePath, raw, updated);
+        const diff = buildFileDiff(filePath, raw, updated);
         context.signal?.throwIfAborted();
         context.onBeforeFileMutation?.(filePath);
         context.signal?.throwIfAborted();
@@ -339,7 +334,8 @@ export async function handleEditTool(
             read_scope_type: snippet.scopeType,
             encoding: freshMetadata.encoding,
             line_endings: freshMetadata.lineEndings,
-            diff_preview: diffPreview,
+            diff_preview: diff.preview,
+            diff_details: diff.details,
             scope: formatScopeMetadata(scope),
           },
         };
