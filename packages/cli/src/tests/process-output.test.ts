@@ -369,6 +369,7 @@ test("Ctrl+O opens output for an empty prompt and expands pasted text in a nonem
       onSubmit() {},
       onPromptDraftApplied() {},
       onModelConfigChange: () => "",
+      onPermissionSettingsChange: () => "",
       onPlanModeChange() {},
       onInterrupt() {},
       onToggleProcessStdout: () => {

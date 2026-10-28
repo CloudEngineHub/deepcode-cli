@@ -23,6 +23,7 @@ test("buildSlashCommands prefixes skills before built-ins", () => {
   assert.deepEqual(builtinNames, [
     "skills",
     "model",
+    "permissions",
     "plan",
     "new",
     "init",
@@ -243,4 +244,14 @@ test("formatSlashCommandLabel marks loaded skills", () => {
 
   assert.equal(formatSlashCommandLabel(items[0]), "/loaded ✓");
   assert.equal(formatSlashCommandLabel(items[1]), "/fresh");
+});
+
+test("permissions command supports completion and takes precedence over a same-name skill", () => {
+  const items = buildSlashCommands([
+    { name: "permissions", path: "/skills/permissions/SKILL.md", description: "skill" },
+  ]);
+  assert.ok(filterSlashCommands(items, "/perm").some((item) => item.kind === "permissions"));
+  const submission = resolveSlashSubmission(items, "/permissions");
+  assert.equal(submission?.kind, "command");
+  assert.equal(submission?.item.kind, "permissions");
 });

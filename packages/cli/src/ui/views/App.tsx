@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
 import { createOpenAIClientFactory } from "@vegamo/deepcode-core";
-import type { PermissionScope } from "@vegamo/deepcode-core";
+import type { PermissionScope, PermissionSettingsEdit, PermissionSettingsChanges } from "@vegamo/deepcode-core";
 import { type ModelConfigSelection } from "@vegamo/deepcode-core";
 import { type PromptDraft, PromptInput, type PromptSubmission } from "./PromptInput";
 import { MessageView, RawModeExitPrompt } from "../components";
@@ -41,7 +41,11 @@ import {
   isCurrentSessionEmpty,
   renderRawModeMessages,
 } from "../utils";
-import { resolveCurrentSettings, writeModelConfigSelection } from "@vegamo/deepcode-core";
+import {
+  resolveCurrentSettings,
+  writeModelConfigSelection,
+  writePermissionSettingsChanges,
+} from "@vegamo/deepcode-core";
 import { useStatusLine } from "../hooks";
 import type { SessionInfo } from "../statusline";
 import { isCollapsedThinking } from "../core/thinking-state";
@@ -566,6 +570,15 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const handleAdjustBashTimeout = useCallback(
     (deltaMs: number, processId: string) => sessionManager.adjustActiveBashTimeout(deltaMs, processId),
     [sessionManager]
+  );
+
+  const handlePermissionSettingsChange = useCallback(
+    (target: PermissionSettingsEdit["target"], changes: PermissionSettingsChanges): string => {
+      const { changed } = writePermissionSettingsChanges(target, changes, projectRoot);
+      setResolvedSettings(resolveCurrentSettings(projectRoot));
+      return changed ? `Permissions saved (${target === "project" ? "Project" : "User"})` : "Permissions unchanged";
+    },
+    [projectRoot]
   );
 
   const handleModelConfigChange = useCallback(
@@ -1181,6 +1194,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           onPromptDraftApplied={handlePromptDraftApplied}
           onSubmit={handleSubmit}
           onModelConfigChange={handleModelConfigChange}
+          onPermissionSettingsChange={handlePermissionSettingsChange}
           onRawModeChange={handleRawModeChange}
           onInterrupt={handleInterrupt}
           onToggleProcessStdout={handleToggleProcessStdout}

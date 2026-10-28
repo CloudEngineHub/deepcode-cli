@@ -255,7 +255,7 @@ function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-const VALID_PERMISSION_SCOPES = new Set<PermissionScope>([
+export const PERMISSION_SCOPES: readonly PermissionScope[] = [
   "read-in-cwd",
   "read-in-tmp",
   "read-out-cwd",
@@ -268,7 +268,9 @@ const VALID_PERMISSION_SCOPES = new Set<PermissionScope>([
   "mutate-git-log",
   "network",
   "mcp",
-]);
+];
+
+const VALID_PERMISSION_SCOPES = new Set(PERMISSION_SCOPES);
 
 function normalizePermissionList(value: unknown): PermissionScope[] {
   if (!Array.isArray(value)) {
@@ -327,7 +329,7 @@ function normalizePermissions(settings: PermissionSettings | null | undefined): 
   };
 }
 
-function mergePermissions(
+export function mergePermissions(
   userSettings: DeepcodingSettings | null | undefined,
   projectSettings: DeepcodingSettings | null | undefined
 ): Required<PermissionSettings> {

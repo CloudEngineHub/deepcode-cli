@@ -26,7 +26,20 @@ export {
   DEFAULT_FILE_QUOTA_CLEANUP_BATCH,
   DEFAULT_MAX_REQUEST_FILES_BYTES,
   MAX_FILES_API_TIMEOUT_MS,
+  PERMISSION_SCOPES,
 } from "./settings";
+export {
+  readPermissionSettingsEdit,
+  getPermissionScopeSelection,
+  applyPermissionSettingsChanges,
+  previewPermissionSettings,
+  writePermissionSettingsChanges,
+} from "./permission-settings";
+export type {
+  PermissionScopeSelection,
+  PermissionSettingsChanges,
+  PermissionSettingsEdit,
+} from "./permission-settings";
 export type {
   DeepcodePlusSettings,
   SubscriptionPlan,
