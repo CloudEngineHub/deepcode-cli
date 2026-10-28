@@ -89,10 +89,9 @@ test("saving re-reads the file and keeps the original destination even if a proj
 test("unchanged selections neither create nor rewrite settings", (t) => {
   const f = fixture(t);
   assert.deepEqual(writePermissionSettingsChanges("user", {}, f.project), { changed: false });
-  assert.deepEqual(
-    writePermissionSettingsChanges("user", { defaultMode: "allowAll", scopes: { mcp: "default" } }, f.project),
-    { changed: false }
-  );
+  assert.deepEqual(writePermissionSettingsChanges("user", { scopes: { mcp: "default" } }, f.project), {
+    changed: false,
+  });
   assert.equal(fs.existsSync(f.file(f.home)), false);
   f.write(f.project, { permissions: { defaultMode: "askAll" } });
   const before = fs.readFileSync(f.file(f.project), "utf8");
@@ -102,6 +101,81 @@ test("unchanged selections neither create nor rewrite settings", (t) => {
   assert.deepEqual(writePermissionSettingsChanges("project", { scopes: { network: "allow" } }, f.project), {
     changed: false,
   });
+});
+
+test("explicitly saving an inherited default mode creates project settings", (t) => {
+  const f = fixture(t);
+  f.write(f.home, { permissions: { defaultMode: "askAll", deny: ["network"] } });
+  assert.deepEqual(writePermissionSettingsChanges("project", { defaultMode: "askAll" }, f.project), { changed: true });
+  assert.deepEqual(f.read(f.project), { permissions: { defaultMode: "askAll" } });
+  assert.deepEqual(f.read(f.home), { permissions: { defaultMode: "askAll", deny: ["network"] } });
+});
+
+test("global permission saving clears only edited project scopes and matches its preview", (t) => {
+  const f = fixture(t);
+  f.write(f.home, { permissions: { allow: ["network"], deny: ["mcp"] }, notify: "user" });
+  f.write(f.project, {
+    model: "keep",
+    permissions: {
+      defaultMode: "askAll",
+      allow: ["mcp"],
+      deny: ["network", "read-in-cwd"],
+      ask: ["network"],
+      addWorkingDirs: ["/extra"],
+    },
+  });
+  const projectEdit = readPermissionSettingsEdit(f.project);
+  const edit = {
+    target: "user" as const,
+    permissions: projectEdit.otherPermissions,
+    otherPermissions: projectEdit.permissions,
+  };
+  const changes = { scopes: { network: "allow" as const } };
+  const preview = previewPermissionSettings(edit, changes);
+  assert.equal(evaluatePermissionScopes(["network"], preview.effective), "allow");
+  assert.equal(writePermissionSettingsChanges("user", changes, f.project).changed, true);
+  assert.deepEqual(f.read(f.project), {
+    model: "keep",
+    permissions: { defaultMode: "askAll", allow: ["mcp"], deny: ["read-in-cwd"], ask: [], addWorkingDirs: ["/extra"] },
+  });
+  assert.deepEqual(f.read(f.home), { permissions: { allow: ["network"], deny: ["mcp"] }, notify: "user" });
+  assert.deepEqual(resolveCurrentSettings(f.project).permissions, preview.effective);
+});
+
+test("global default mode saving aligns project mode without clearing unrelated rules", (t) => {
+  const f = fixture(t);
+  f.write(f.home, { permissions: { defaultMode: "askAll" } });
+  f.write(f.project, { permissions: { deny: ["network"] }, notify: "keep" });
+  const changes = { defaultMode: "askAll" as const };
+  const preview = previewPermissionSettings(
+    { target: "user", permissions: f.read(f.home).permissions, otherPermissions: f.read(f.project).permissions },
+    changes
+  );
+  assert.equal(writePermissionSettingsChanges("user", changes, f.project).changed, true);
+  assert.deepEqual(f.read(f.project), { permissions: { defaultMode: "askAll", deny: ["network"] }, notify: "keep" });
+  assert.deepEqual(resolveCurrentSettings(f.project).permissions, preview.effective);
+  assert.equal(evaluatePermissionScopes(["network"], preview.effective), "deny");
+  assert.equal(writePermissionSettingsChanges("user", changes, f.project).changed, false);
+});
+
+test("global default selections remove both layers' scope rules without copying a project default to the user", (t) => {
+  const f = fixture(t);
+  f.write(f.project, { permissions: { defaultMode: "askAll", deny: ["network"] } });
+  writePermissionSettingsChanges("user", { scopes: { network: "default" } }, f.project);
+  assert.equal(fs.existsSync(f.file(f.home)), false);
+  assert.deepEqual(f.read(f.project), { permissions: { defaultMode: "askAll", deny: [] } });
+  writePermissionSettingsChanges("user", { scopes: { mcp: "allow" } }, f.project);
+  assert.deepEqual(f.read(f.home), { permissions: { defaultMode: "allowAll", allow: ["mcp"] } });
+  assert.equal(resolveCurrentSettings(f.project).permissions.defaultMode, "askAll");
+});
+
+test("global saves validate project permissions before updating the user file", (t) => {
+  const f = fixture(t);
+  f.write(f.home, { permissions: { defaultMode: "allowAll" } });
+  f.write(f.project, { permissions: { deny: "network" } });
+  const before = fs.readFileSync(f.file(f.home), "utf8");
+  assert.throws(() => writePermissionSettingsChanges("user", { defaultMode: "askAll" }, f.project));
+  assert.equal(fs.readFileSync(f.file(f.home), "utf8"), before);
 });
 
 test("invalid settings are never overwritten and a repaired file can be retried", (t) => {

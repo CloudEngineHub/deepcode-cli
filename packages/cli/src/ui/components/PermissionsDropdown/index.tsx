@@ -11,6 +11,7 @@ import {
   type PermissionSettingsEdit,
 } from "@vegamo/deepcode-core";
 import DropdownMenu, { type DropdownMenuItem } from "../DropdownMenu";
+import SaveScopeSelector from "../SaveScopeSelector";
 import { useTerminalInput } from "../../hooks";
 
 const MODES: PermissionDefaultMode[] = ["askAll", "allowAll"];
@@ -44,13 +45,18 @@ export function describeScopeSetting(
 }
 
 export default function PermissionsDropdown({
-  edit,
+  edit: initialEdit,
   width,
   onClose,
   onSave,
   onStatusMessage,
 }: Props): React.ReactElement {
   const { rows } = useWindowSize();
+  const [target, setTarget] = useState(initialEdit.target);
+  const edit: PermissionSettingsEdit =
+    target === initialEdit.target || initialEdit.sameFile
+      ? { ...initialEdit, target }
+      : { target, permissions: initialEdit.otherPermissions, otherPermissions: initialEdit.permissions };
   const [step, setStep] = useState<"home" | "defaultMode" | "scopes" | "scope">("home");
   const [activeIndex, setActiveIndex] = useState(0);
   const [scopeIndex, setScopeIndex] = useState(0);
@@ -110,7 +116,10 @@ export default function PermissionsDropdown({
 
   useTerminalInput((input, key) => {
     if (saving || key.paste || key.tab) return;
-    if (key.escape) {
+    if (step === "home" && !key.ctrl && !key.meta && !key.shift && (key.leftArrow || key.rightArrow)) {
+      setTarget(key.leftArrow ? "user" : "project");
+      setError(null);
+    } else if (key.escape) {
       setError(null);
       if (step === "home") onClose();
       else if (step === "scope") {
@@ -140,10 +149,7 @@ export default function PermissionsDropdown({
         setActiveIndex(DECISIONS.indexOf(getPermissionScopeSelection(permissions, PERMISSION_SCOPES[activeIndex]!)));
       } else {
         const selection = DECISIONS[activeIndex]!;
-        const scopes = { ...changes.scopes };
-        if (selection === getPermissionScopeSelection(edit.permissions, scope)) delete scopes[scope];
-        else scopes[scope] = selection;
-        setChanges({ ...changes, scopes });
+        setChanges({ ...changes, scopes: { ...changes.scopes, [scope]: selection } });
         setStep("scopes");
         setActiveIndex(scopeIndex);
       }
@@ -170,6 +176,7 @@ export default function PermissionsDropdown({
         activeIndex={activeIndex}
         maxVisible={step === "home" ? items.length : Math.max(1, Math.min(8, rows - 10))}
         helpText={helpText}
+        footer={step === "home" ? <SaveScopeSelector target={target} /> : undefined}
         renderItem={(item, active) => (
           <Box paddingX={1} gap={showDescriptions ? 2 : 0}>
             <Box width={labelWidth} flexShrink={0}>

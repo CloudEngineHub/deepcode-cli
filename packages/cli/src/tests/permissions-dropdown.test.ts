@@ -1,58 +1,22 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { PassThrough, Writable } from "node:stream";
-import { setTimeout } from "node:timers/promises";
-import { stripVTControlCharacters } from "node:util";
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import React, { useState } from "react";
-import { render, Text } from "ink";
+import { Text } from "ink";
+import { terminal } from "./terminal-helper";
 import stringWidth from "string-width";
-import type { PermissionSettingsChanges, PermissionSettingsEdit } from "@vegamo/deepcode-core";
+import type {
+  ModelConfigSelection,
+  SettingsTarget,
+  PermissionSettingsChanges,
+  PermissionSettingsEdit,
+} from "@vegamo/deepcode-core";
 import { writePermissionSettingsChanges, resolveCurrentSettings } from "@vegamo/deepcode-core";
 import PermissionsDropdown, { describeScopeSetting } from "../ui/components/PermissionsDropdown";
 import { PromptInput, type PromptSubmission } from "../ui/views/PromptInput";
-
-async function terminal(t: TestContext, element: React.ReactElement, columns = 80) {
-  let frame = "";
-  const stdin = Object.assign(new PassThrough(), { isTTY: true, setRawMode() {}, ref() {}, unref() {} });
-  const stdout = Object.assign(
-    new Writable({
-      write(chunk, _encoding, done) {
-        const text = stripVTControlCharacters(chunk.toString());
-        if (text.trim()) frame = text;
-        done();
-      },
-    }),
-    { isTTY: true, columns, rows: 40 }
-  );
-  const app = render(element, {
-    stdin: stdin as unknown as NodeJS.ReadStream,
-    stdout: stdout as unknown as NodeJS.WriteStream,
-    stderr: stdout as unknown as NodeJS.WriteStream,
-    debug: true,
-    patchConsole: false,
-    exitOnCtrlC: false,
-  });
-  t.after(() => {
-    app.unmount();
-    app.cleanup();
-  });
-  async function flush() {
-    await setTimeout(35);
-    await app.waitUntilRenderFlush();
-  }
-  await flush();
-  return {
-    frame: () => frame,
-    async send(input: string) {
-      stdin.emit("data", input);
-      await flush();
-    },
-  };
-}
 
 async function editor(
   t: TestContext,
@@ -63,6 +27,7 @@ async function editor(
   } = {}
 ) {
   const saves: PermissionSettingsChanges[] = [];
+  const targets: PermissionSettingsEdit["target"][] = [];
   const statuses: string[] = [];
   let closed = 0;
   function Probe() {
@@ -76,7 +41,8 @@ async function editor(
             setOpen(false);
           },
           onStatusMessage: (message) => statuses.push(message),
-          onSave: async (_target, changes) => {
+          onSave: async (target, changes) => {
+            targets.push(target);
             await options.save?.(changes);
             saves.push(changes);
             return "Permissions saved";
@@ -85,9 +51,11 @@ async function editor(
       : React.createElement(Text, null, "closed");
   }
   const h = await terminal(t, React.createElement(Probe), options.width);
-  return { ...h, saves, statuses, closed: () => closed };
+  return { ...h, saves, targets, statuses, closed: () => closed };
 }
 
+const LEFT = "\u001b[D";
+const RIGHT = "\u001b[C";
 const DOWN = "\u001b[B";
 const UP = "\u001b[A";
 const ESC = "\u001b";
@@ -250,7 +218,7 @@ test("pending saves ignore duplicate submissions and navigation", async (t) => {
   await h.send(UP);
   await h.send(ENTER);
   assert.match(h.frame(), /Saving…/);
-  for (const input of [ENTER, " ", DOWN, ESC, TAB, SHIFT_TAB]) await h.send(input);
+  for (const input of [ENTER, " ", DOWN, LEFT, RIGHT, ESC, TAB, SHIFT_TAB]) await h.send(input);
   assert.equal(attempts, 1);
   assert.equal(h.closed(), 0);
   assert.match(h.frame(), /> Save/);
@@ -286,6 +254,13 @@ test("conflicts identify the effective decision and layer without treating defau
 test("narrow terminals keep descriptions beside labels and scroll through scopes", async (t) => {
   const h = await editor(t, { width: 36 });
   assert.match(h.frame(), /Save/);
+  assert.match(h.frame(), /All Projects +\[This Project\]/);
+  assert.ok(
+    h
+      .frame()
+      .split("\n")
+      .every((line) => stringWidth(line) <= 36)
+  );
   await h.send(DOWN);
   await h.send(ENTER);
   assert.match(h.frame(), /read-out-cwd/);
@@ -322,6 +297,82 @@ test("narrow terminals keep descriptions beside labels and scroll through scopes
   );
 });
 
+test("scope selector keeps the cursor, swaps layers, and is only active on home", async (t) => {
+  const h = await editor(t, {
+    edit: { target: "project", permissions: { defaultMode: "askAll" }, otherPermissions: { defaultMode: "allowAll" } },
+  });
+  assert.match(h.frame(), /All Projects +\[This Project\]/);
+  await h.send(DOWN);
+  await h.send(LEFT);
+  assert.match(h.frame(), /\[All Projects\] +This Project/);
+  assert.match(h.frame(), /Permissions · User/);
+  assert.match(h.frame(), /defaultMode +allowAll/);
+  assert.match(h.frame(), /> scopes/);
+  await h.send(LEFT);
+  assert.match(h.frame(), /\[All Projects\]/);
+  await h.send(ENTER);
+  assert.doesNotMatch(h.frame(), /Remember this choice/);
+  await h.send(RIGHT);
+  assert.match(h.frame(), /scopes · User/);
+  await h.send(ESC);
+  await h.send(RIGHT);
+  assert.match(h.frame(), /> scopes/);
+  assert.match(h.frame(), /defaultMode +askAll/);
+  await h.send(ESC);
+  assert.deepEqual(h.saves, []);
+});
+
+test("explicitly reselecting a scope retains the choice when moving its draft to all projects", async (t) => {
+  const h = await editor(t, {
+    edit: {
+      target: "project",
+      permissions: { deny: ["read-in-cwd"] },
+      otherPermissions: { allow: ["read-in-cwd"] },
+    },
+  });
+  await h.send(DOWN);
+  await h.send(ENTER);
+  await h.send(ENTER);
+  assert.match(h.frame(), /> ● deny/);
+  await h.send(ENTER); // Explicitly keep deny, then move it to another layer.
+  await h.send(ESC);
+  await h.send(LEFT);
+  await h.send(ENTER);
+  assert.match(h.frame(), /read-in-cwd +deny/);
+  await h.send(ESC);
+  await h.send(DOWN);
+  await h.send(ENTER);
+  assert.deepEqual(h.targets, ["user"]);
+  assert.deepEqual(h.saves, [{ scopes: { "read-in-cwd": "deny" } }]);
+});
+
+test("default mode drafts follow the destination and global previews remove only edited project rules", async (t) => {
+  const h = await editor(t, {
+    edit: {
+      target: "project",
+      permissions: { defaultMode: "allowAll", deny: ["read-in-cwd", "read-in-tmp"] },
+      otherPermissions: { defaultMode: "askAll" },
+    },
+  });
+  await h.send(ENTER);
+  await h.send(ENTER); // Keep allowAll explicitly.
+  await h.send(LEFT);
+  assert.match(h.frame(), /> defaultMode +allowAll/);
+  await h.send(DOWN);
+  await h.send(ENTER);
+  assert.match(h.frame(), /read-in-tmp +default · effective: deny \(Project\)/);
+  await h.send(ENTER);
+  assert.match(h.frame(), /allow +Allow automatically +│/);
+  await h.send(DOWN); // default -> allow
+  await h.send(ENTER);
+  assert.match(h.frame(), /read-in-cwd +allow +│/);
+  await h.send(ESC);
+  await h.send(DOWN);
+  await h.send(ENTER);
+  assert.deepEqual(h.targets, ["user"]);
+  assert.deepEqual(h.saves, [{ defaultMode: "allowAll", scopes: { "read-in-cwd": "allow" } }]);
+});
+
 test("slash command opens the editor, persists settings, and isolates menu keys from the prompt", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-prompt-"));
   t.mock.method(os, "homedir", () => path.join(root, "user"));
@@ -335,6 +386,7 @@ test("slash command opens the editor, persists settings, and isolates menu keys 
   fs.mkdirSync(path.join(projectRoot, ".deepcode"), { recursive: true });
   fs.writeFileSync(path.join(projectRoot, ".deepcode", "settings.json"), "{}");
   const submissions: PromptSubmission[] = [];
+  const modelSaves: { selection: ModelConfigSelection; target: SettingsTarget }[] = [];
   let interruptions = 0;
   let toggles = 0;
   let planModeChanges = 0;
@@ -350,7 +402,10 @@ test("slash command opens the editor, persists settings, and isolates menu keys 
       planMode: false,
       onSubmit: (submission) => submissions.push(submission),
       onPromptDraftApplied() {},
-      onModelConfigChange: () => "",
+      onModelConfigChange: (selection, target) => {
+        modelSaves.push({ selection, target });
+        return "Model settings saved";
+      },
       onPermissionSettingsChange: (target, changes) => {
         writePermissionSettingsChanges(target, changes, projectRoot);
         return "Permissions saved";
@@ -391,6 +446,16 @@ test("slash command opens the editor, persists settings, and isolates menu keys 
   assert.equal(interruptions, 0);
   assert.equal(toggles, 0);
   assert.equal(planModeChanges, 0);
+  await h.send("/model");
+  await h.send(ENTER);
+  assert.match(h.frame(), /All Projects +\[This Project\]/);
+  await h.send(LEFT);
+  await h.send(ENTER);
+  await h.send(ENTER);
+  assert.deepEqual(modelSaves, [
+    { selection: { model: "deepseek-flash", thinkingEnabled: false, reasoningEffort: "high" }, target: "user" },
+  ]);
+  assert.equal(submissions.length, 0);
   await h.send("hello");
   await h.send(ENTER);
   assert.equal(submissions.length, 1);

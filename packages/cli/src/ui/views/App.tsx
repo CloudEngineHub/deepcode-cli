@@ -3,7 +3,7 @@ import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
 import { createOpenAIClientFactory } from "@vegamo/deepcode-core";
 import type { PermissionSettingsEdit, PermissionSettingsChanges } from "@vegamo/deepcode-core";
-import { type ModelConfigSelection } from "@vegamo/deepcode-core";
+import { type ModelConfigSelection, type SettingsTarget } from "@vegamo/deepcode-core";
 import { type PromptDraft, PromptInput, type PromptSubmission } from "./PromptInput";
 import { MessageView, RawModeExitPrompt } from "../components";
 import { SessionList } from "./SessionList";
@@ -573,27 +573,32 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     (target: PermissionSettingsEdit["target"], changes: PermissionSettingsChanges): string => {
       const { changed } = writePermissionSettingsChanges(target, changes, projectRoot);
       setResolvedSettings(resolveCurrentSettings(projectRoot));
-      return changed ? `Permissions saved (${target === "project" ? "Project" : "User"})` : "Permissions unchanged";
+      return changed
+        ? `Permissions saved (${target === "project" ? "This Project" : "All Projects"})`
+        : "Permissions unchanged";
     },
     [projectRoot]
   );
 
   const handleModelConfigChange = useCallback(
-    (selection: ModelConfigSelection): string => {
+    (selection: ModelConfigSelection, target: SettingsTarget): string => {
       const current = resolveCurrentSettings(projectRoot);
-      const { changed } = writeModelConfigSelection(selection, current, projectRoot);
+      const { changed } = writeModelConfigSelection(selection, current, projectRoot, target);
       const next = resolveCurrentSettings(projectRoot);
       setResolvedSettings(next);
 
       if (!changed) {
         return "Model settings unchanged";
       }
+      if (formatModelConfig(current) === formatModelConfig(next)) {
+        return `Model settings saved (${target === "project" ? "This Project" : "All Projects"})`;
+      }
 
       const activeSessionId = sessionManager.getActiveSessionId();
       const meta: MessageMeta = {
         isModelChange: true,
       };
-      const content = `/model\n└ Set model to ${selection.model} (${selection?.thinkingEnabled ? selection?.reasoningEffort : "no thinking"})`;
+      const content = `/model\n└ Set model to ${next.model} (${next.thinkingEnabled ? next.reasoningEffort : "no thinking"})`;
 
       if (activeSessionId) {
         sessionManager.addSessionSystemMessage(activeSessionId, content, true, meta);

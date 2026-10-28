@@ -149,6 +149,8 @@ export type ModelConfigSelection = {
   reasoningEffort: ReasoningEffort;
 };
 
+export type SettingsTarget = "project" | "user";
+
 export type SettingsProcessEnv = Record<string, string | undefined>;
 
 const DEFAULT_CONTEXT_WINDOW = 256 * 1024;
@@ -771,8 +773,24 @@ export function modelConfigKey(config: Pick<ModelConfigSelection, "thinkingEnabl
 export function applyModelConfigSelection(
   settings: DeepcodingSettings | null | undefined,
   current: ModelConfigSelection,
-  selected: ModelConfigSelection
+  selected: ModelConfigSelection,
+  persistSelection = false
 ): { settings: DeepcodingSettings; changed: boolean } {
+  // An explicit save destination must remember the choice even if it is already inherited.
+  if (persistSelection) {
+    return {
+      settings: {
+        ...settings,
+        model: selected.model,
+        thinkingEnabled: selected.thinkingEnabled,
+        reasoningEffort: selected.reasoningEffort,
+      },
+      changed:
+        settings?.model !== selected.model ||
+        settings?.thinkingEnabled !== selected.thinkingEnabled ||
+        settings?.reasoningEffort !== selected.reasoningEffort,
+    };
+  }
   const changed = selected.model !== current.model || modelConfigKey(selected) !== modelConfigKey(current);
   const next: DeepcodingSettings = { ...(settings ?? {}) };
 
@@ -821,6 +839,29 @@ export function getProjectSettingsPath(projectRoot: string): string {
   return path.join(projectRoot, ".deepcode", "settings.json");
 }
 
+export function getDefaultSettingsTarget(projectRoot: string = process.cwd()): SettingsTarget {
+  return fs.existsSync(getProjectSettingsPath(projectRoot)) ? "project" : "user";
+}
+
+/** A malformed or unreadable file must never be treated as empty when saving. */
+export function readEditableSettings(settingsPath: string): DeepcodingSettings {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(settingsPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  const settings = JSON.parse(raw) as DeepcodingSettings;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    throw new Error(`Invalid settings in ${settingsPath}`);
+  }
+  if (settings.env !== undefined && !isPlainObject(settings.env)) {
+    throw new Error(`Invalid env in ${settingsPath}`);
+  }
+  return settings;
+}
+
 export function readSettingsFile(settingsPath: string): DeepcodingSettings | null {
   try {
     if (!fs.existsSync(settingsPath)) {
@@ -859,20 +900,38 @@ export function writeProjectSettings(settings: DeepcodingSettings, projectRoot: 
 export function writeModelConfigSelection(
   selection: ModelConfigSelection,
   current: ModelConfigSelection = resolveCurrentSettings(),
-  projectRoot: string = process.cwd()
+  projectRoot: string = process.cwd(),
+  target: SettingsTarget = getDefaultSettingsTarget(projectRoot)
 ): { changed: boolean; settings: DeepcodingSettings } {
   const projectSettingsPath = getProjectSettingsPath(projectRoot);
-  const shouldWriteProjectSettings = fs.existsSync(projectSettingsPath);
-  const rawSettings = shouldWriteProjectSettings ? readProjectSettings(projectRoot) : readSettings();
-  const result = applyModelConfigSelection(rawSettings, current, selection);
+  const userSettingsPath = getUserSettingsPath();
+  const rawSettings = readEditableSettings(target === "project" ? projectSettingsPath : userSettingsPath);
+  const result = applyModelConfigSelection(rawSettings, current, selection, true);
+  let projectSettings: DeepcodingSettings | undefined;
+  let projectChanged = false;
+  if (target === "user" && path.resolve(projectSettingsPath) !== path.resolve(userSettingsPath)) {
+    const previous = readEditableSettings(projectSettingsPath);
+    projectSettings = { ...previous };
+    delete projectSettings.model;
+    delete projectSettings.thinkingEnabled;
+    delete projectSettings.reasoningEffort;
+    if (previous.env) {
+      projectSettings.env = { ...previous.env };
+      delete projectSettings.env.MODEL;
+      delete projectSettings.env.THINKING_ENABLED;
+      delete projectSettings.env.REASONING_EFFORT;
+    }
+    projectChanged = JSON.stringify(previous) !== JSON.stringify(projectSettings);
+  }
   if (result.changed) {
-    if (shouldWriteProjectSettings) {
+    if (target === "project") {
       writeProjectSettings(result.settings, projectRoot);
     } else {
       writeSettings(result.settings);
     }
   }
-  return result;
+  if (projectChanged) writeProjectSettings(projectSettings!, projectRoot);
+  return { ...result, changed: result.changed || projectChanged };
 }
 
 export function resolveCurrentSettings(projectRoot: string = process.cwd()): ResolvedDeepcodingSettings {

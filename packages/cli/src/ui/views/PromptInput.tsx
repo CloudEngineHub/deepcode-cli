@@ -68,6 +68,7 @@ import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import {
   readPermissionSettingsEdit,
   type ModelConfigSelection,
+  type SettingsTarget,
   type PermissionSettingsEdit,
   type PermissionSettingsChanges,
 } from "@vegamo/deepcode-core";
@@ -110,7 +111,7 @@ type Props = {
   planMode: boolean;
   onSubmit: (submission: PromptSubmission) => void;
   onPromptDraftApplied: (nonce: number) => void;
-  onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
+  onModelConfigChange: (selection: ModelConfigSelection, target: SettingsTarget) => string | Promise<string>;
   onPermissionSettingsChange: (
     target: PermissionSettingsEdit["target"],
     changes: PermissionSettingsChanges
@@ -925,6 +926,7 @@ export const PromptInput = React.memo(function PromptInput({
         />
       ) : null}
       <ModelsDropdown
+        projectRoot={projectRoot}
         open={showModelDropdown}
         modelConfig={modelConfig}
         width={screenWidth}

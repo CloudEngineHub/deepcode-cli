@@ -1,16 +1,18 @@
-import * as fs from "fs";
 import * as path from "path";
 import {
+  getDefaultSettingsTarget,
   getProjectSettingsPath,
   getUserSettingsPath,
   mergePermissions,
   PERMISSION_SCOPES,
+  readEditableSettings,
   writeProjectSettings,
   writeSettings,
   type DeepcodingSettings,
   type PermissionDefaultMode,
   type PermissionScope,
   type PermissionSettings,
+  type SettingsTarget,
 } from "./settings";
 
 export type PermissionScopeSelection = "allow" | "deny" | "ask" | "default";
@@ -21,24 +23,15 @@ export type PermissionSettingsChanges = {
 };
 
 export type PermissionSettingsEdit = {
-  target: "project" | "user";
+  target: SettingsTarget;
+  sameFile?: boolean;
   permissions?: PermissionSettings;
   otherPermissions?: PermissionSettings;
 };
 
 /** Editing must not mistake an unreadable or malformed file for an empty one. */
-function readEditableSettings(settingsPath: string): DeepcodingSettings {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(settingsPath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw error;
-  }
-  const settings = JSON.parse(raw) as DeepcodingSettings;
-  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
-    throw new Error(`Invalid settings in ${settingsPath}`);
-  }
+function readEditablePermissionSettings(settingsPath: string): DeepcodingSettings {
+  const settings = readEditableSettings(settingsPath);
   const permissions = settings.permissions;
   if (permissions !== undefined) {
     if (!permissions || typeof permissions !== "object" || Array.isArray(permissions)) {
@@ -62,18 +55,23 @@ function readPermissionSettingsTarget(
   target: PermissionSettingsEdit["target"]
 ): {
   settings: DeepcodingSettings;
+  otherSettings: DeepcodingSettings;
   edit: PermissionSettingsEdit;
 } {
   const projectPath = getProjectSettingsPath(projectRoot);
   const userPath = getUserSettingsPath();
   const sameFile = path.resolve(projectPath) === path.resolve(userPath);
-  const settings = readEditableSettings(target === "project" ? projectPath : userPath);
-  const other = sameFile ? {} : readEditableSettings(target === "project" ? userPath : projectPath);
-  return { settings, edit: { target, permissions: settings.permissions, otherPermissions: other.permissions } };
+  const settings = readEditablePermissionSettings(target === "project" ? projectPath : userPath);
+  const otherSettings = sameFile ? {} : readEditablePermissionSettings(target === "project" ? userPath : projectPath);
+  return {
+    settings,
+    otherSettings,
+    edit: { target, permissions: settings.permissions, otherPermissions: otherSettings.permissions, sameFile },
+  };
 }
 
 export function readPermissionSettingsEdit(projectRoot: string = process.cwd()): PermissionSettingsEdit {
-  const target = fs.existsSync(getProjectSettingsPath(projectRoot)) ? "project" : "user";
+  const target = getDefaultSettingsTarget(projectRoot);
   return readPermissionSettingsTarget(projectRoot, target).edit;
 }
 
@@ -94,10 +92,7 @@ export function applyPermissionSettingsChanges(
 ): DeepcodingSettings {
   const permissions = { ...settings.permissions };
   let changed = false;
-  if (
-    changes.defaultMode !== undefined &&
-    changes.defaultMode !== (settings.permissions ? (permissions.defaultMode ?? "allowAll") : currentDefaultMode)
-  ) {
+  if (changes.defaultMode !== undefined && changes.defaultMode !== permissions.defaultMode) {
     permissions.defaultMode = changes.defaultMode;
     changed = true;
   }
@@ -126,11 +121,30 @@ export function previewPermissionSettings(
   changes: PermissionSettingsChanges = {}
 ): { permissions: PermissionSettings | undefined; effective: Required<PermissionSettings> } {
   const own = { permissions: edit.permissions };
-  const other = { permissions: edit.otherPermissions };
+  const other = {
+    permissions:
+      edit.target === "user" ? clearProjectPermissionOverrides(edit.otherPermissions, changes) : edit.otherPermissions,
+  };
   const merge = (settings: DeepcodingSettings) =>
     edit.target === "project" ? mergePermissions(other, settings) : mergePermissions(settings, other);
-  const settings = applyPermissionSettingsChanges(own, changes, merge(own).defaultMode);
+  const currentDefaultMode = edit.target === "user" ? mergePermissions(own, null).defaultMode : merge(own).defaultMode;
+  const settings = applyPermissionSettingsChanges(own, changes, currentDefaultMode);
   return { permissions: settings.permissions, effective: merge(settings) };
+}
+
+function clearProjectPermissionOverrides(
+  permissions: PermissionSettings | undefined,
+  changes: PermissionSettingsChanges
+): PermissionSettings | undefined {
+  if (!permissions) return undefined;
+  const next = { ...permissions };
+  for (const decision of ["allow", "deny", "ask"] as const) {
+    if (next[decision]) next[decision] = next[decision].filter((scope) => changes.scopes?.[scope] === undefined);
+  }
+  // An existing project permissions object always supplies a default mode,
+  // even when the defaultMode key is absent. Keep it aligned when explicitly edited.
+  if (changes.defaultMode !== undefined) next.defaultMode = changes.defaultMode;
+  return next;
 }
 
 export function writePermissionSettingsChanges(
@@ -138,11 +152,20 @@ export function writePermissionSettingsChanges(
   changes: PermissionSettingsChanges,
   projectRoot: string = process.cwd()
 ): { changed: boolean } {
-  // Re-read both layers, but keep the destination selected when the editor opened.
-  const { settings, edit } = readPermissionSettingsTarget(projectRoot, target);
-  const next = applyPermissionSettingsChanges(settings, changes, previewPermissionSettings(edit).effective.defaultMode);
-  if (next === settings) return { changed: false };
-  if (target === "project") writeProjectSettings(next, projectRoot);
-  else writeSettings(next);
-  return { changed: true };
+  const { settings, otherSettings, edit } = readPermissionSettingsTarget(projectRoot, target);
+  const currentDefaultMode =
+    target === "user"
+      ? mergePermissions(settings, null).defaultMode
+      : previewPermissionSettings(edit).effective.defaultMode;
+  const next = applyPermissionSettingsChanges(settings, changes, currentDefaultMode);
+  const projectPermissions =
+    target === "user" ? clearProjectPermissionOverrides(otherSettings.permissions, changes) : undefined;
+  const projectChanged =
+    target === "user" && JSON.stringify(projectPermissions) !== JSON.stringify(otherSettings.permissions);
+  if (next !== settings) {
+    if (target === "project") writeProjectSettings(next, projectRoot);
+    else writeSettings(next);
+  }
+  if (projectChanged) writeProjectSettings({ ...otherSettings, permissions: projectPermissions }, projectRoot);
+  return { changed: next !== settings || projectChanged };
 }

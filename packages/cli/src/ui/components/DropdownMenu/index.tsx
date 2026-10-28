@@ -40,6 +40,8 @@ type DropdownMenuProps = {
   activeColor?: string;
   /** Help text displayed at the bottom */
   helpText?: string;
+  /** Optional content between the list and bottom help text. */
+  footer?: React.ReactNode;
   /** Text to display when items list is empty */
   emptyText?: string;
   /** Custom item renderer (overrides default rendering) */
@@ -67,6 +69,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
   titleColor = "#229ac3",
   activeColor = "cyanBright",
   helpText,
+  footer,
   emptyText = "No items found",
   renderItem,
 }: DropdownMenuProps): React.ReactElement | null {
@@ -107,6 +110,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
           </Text>
         ) : null}
         <Text dimColor>{emptyText}</Text>
+        {footer}
         {helpText ? <Text dimColor>{helpText}</Text> : null}
       </Box>
     );
@@ -173,6 +177,8 @@ const DropdownMenu = React.memo(function DropdownMenu({
           <Text dimColor>… {items.length - visibleStart - visibleItems.length} more</Text>
         </Box>
       ) : null}
+
+      {footer}
 
       {/* Help text */}
       {helpText ? (
