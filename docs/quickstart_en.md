@@ -123,6 +123,7 @@ Type `/` in the input box to open the command menu.
 | `/fork` | Fork the current conversation |
 | `/continue` | Continue the current conversation or resume the latest one |
 | `/model` | Switch model, thinking mode, and reasoning effort |
+| `/permissions` | Configure tool permissions interactively |
 | `/init` | Create an `AGENTS.md` instruction file for the current project |
 | `/skills` | Show available Agent Skills |
 | `/mcp` | Show MCP server status and available tools |

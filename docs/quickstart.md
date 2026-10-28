@@ -123,6 +123,7 @@ deepcode -p "总结这个项目"
 | `/fork` | 从当前对话创建独立的新会话 |
 | `/continue` | 继续当前对话，或恢复最近的对话 |
 | `/model` | 切换模型、思考模式和推理强度 |
+| `/permissions` | 交互式配置工具权限 |
 | `/init` | 为当前项目生成 `AGENTS.md` 指令文件 |
 | `/skills` | 查看可用 Agent Skills |
 | `/mcp` | 查看 MCP 服务状态和可用工具 |
