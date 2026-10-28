@@ -177,5 +177,11 @@ export type {
 export type { FileState, FileSnippet, FileLineEnding } from "./common/state";
 export type { FileReadMetadata } from "./common/file-utils";
 
-export { checkPlusSubscription, withPlusSubscription } from "./common/plus-subscription";
+export {
+  checkPlusSubscription,
+  withPlusSubscription,
+  normalizePlusApiKey,
+  resolveEffectivePlusSettings,
+  writeDeepcodePlusApiKey,
+} from "./common/plus-subscription";
 export type { PlusSubscriptionStatus, OpenAIConnection, OpenAIConnectionContext } from "./common/plus-subscription";

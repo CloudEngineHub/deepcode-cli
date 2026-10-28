@@ -13,6 +13,8 @@ import { isValidSessionId } from "@vegamo/deepcode-core";
 export { isValidSessionId };
 
 export interface ParsedCliArgs {
+  /** Configure the DeepCode Plus API key and exit. */
+  plus: boolean;
   /** Prompt text from -p / --prompt */
   prompt: string | undefined;
   /** Run one prompt without starting the interactive TUI. */
@@ -81,6 +83,11 @@ async function configureYargs(argv?: string[]) {
     .usage("Usage: $0 [options] [command]\n\nDeep Code - Launch the interactive CLI or run one prompt with --exec")
     .command("$0 [query..]", "Launch Deep Code CLI", (yargsInstance: Argv) =>
       yargsInstance
+        .option("plus", {
+          type: "boolean",
+          default: false,
+          describe: "Configure your DeepCode Plus API Key",
+        })
         .option("prompt", {
           alias: "p",
           type: "string",
@@ -124,6 +131,20 @@ async function configureYargs(argv?: string[]) {
           const prompt = argv["prompt"] as string | undefined;
           const exec = argv["exec"] === true;
           const sessionId = argv["session-id"] as string | undefined;
+
+          if (
+            argv["plus"] === true &&
+            (prompt !== undefined ||
+              hasPositionalQuery ||
+              exec ||
+              sessionId !== undefined ||
+              argv["json"] === true ||
+              argv["resume"] !== undefined ||
+              argv["fork"] !== undefined ||
+              argv["last"] === true)
+          ) {
+            return "--plus must be used on its own.";
+          }
 
           if (sessionId !== undefined) {
             if (!exec) return "--session-id requires --exec / -x.";
@@ -174,6 +195,7 @@ async function configureYargs(argv?: string[]) {
         })
     )
     .example("deepcode", "Launch the interactive TUI in the current directory")
+    .example("deepcode --plus", "Configure your DeepCode Plus API Key")
     .example("deepcode -p <prompt>", "Launch the TUI and submit a prompt")
     .example("deepcode -x -p <prompt>", "Run one prompt without launching the TUI")
     .example("deepcode -r, --resume [sessionId]", "Resume a session or show session picker")
@@ -229,6 +251,7 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
   }
 
   return {
+    plus: parsed.plus === true,
     prompt: parsed.prompt as string | undefined,
     exec: parsed.exec === true,
     sessionId: (parsed["session-id"] as string | undefined)?.toLowerCase(),

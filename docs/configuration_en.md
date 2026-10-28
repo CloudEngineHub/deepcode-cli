@@ -305,3 +305,5 @@ Configure PLUS separately in `~/.deepcode-plus/settings.json`:
 - `default`: If you have a DeepCode Plus subscription, it's considered `on`; otherwise, it's considered `off`.
 - `on`: Use the PLUS key, without a subscription check. A missing PLUS key produces an explicit error without falling back.
 - `off`: Always use the regular connection without checking the subscription.
+
+You can also set `env.PLUS_API_KEY` in user-level or project-level `settings.json`. The built-in image and video generation skills still read only the separate Plus settings file. The CLI also supports `deepcode --plus`, which prompts you to enter your DeepCode Plus API Key. After successful verification, the key is saved to `~/.deepcode-plus/settings.json`.

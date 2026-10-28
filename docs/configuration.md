@@ -306,3 +306,5 @@ PLUS 独立配置文件为 `~/.deepcode-plus/settings.json`：
 - `default`：如果开通了DeepCode Plus订阅，则相当于`on`，否则相当于`off`。
 - `on`：直接使用 PLUS key，不执行订阅检查。缺少 PLUS key 时明确报错，不回退普通通道。
 - `off`：固定使用普通通道，不执行订阅检查。
+
+也可以在用户级或项目级 `settings.json` 的 `env.PLUS_API_KEY` 中配置 Key。内置图片、视频生成 Skill 仍只读取独立 Plus 配置。CLI也支持运行 `deepcode --plus`，按提示输入 DeepCode Plus API Key。验证通过后，Key 会保存到 `~/.deepcode-plus/settings.json`。

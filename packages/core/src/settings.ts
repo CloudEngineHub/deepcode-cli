@@ -3,11 +3,13 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { compactBudget, validateCompactRetention } from "./common/compaction";
+import { normalizePlusApiKey } from "./common/plus-subscription";
 
 export type DeepcodingEnv = Record<string, string | undefined> & {
   MODEL?: string;
   BASE_URL?: string;
   API_KEY?: string;
+  PLUS_API_KEY?: string;
   TEMPERATURE?: string;
   THINKING_ENABLED?: string;
   REASONING_EFFORT?: string;
@@ -594,6 +596,16 @@ export function resolveSettingsSources(
     ...projectEnv,
     ...systemEnv,
   };
+  // Select before normalizing so invalid configured values cannot silently fall back.
+  const plusKey =
+    systemEnv.PLUS_API_KEY !== undefined
+      ? systemEnv.PLUS_API_KEY
+      : projectSettings?.env?.PLUS_API_KEY !== undefined
+        ? projectSettings.env.PLUS_API_KEY
+        : userSettings?.env?.PLUS_API_KEY;
+  if (plusKey !== undefined) {
+    env.PLUS_API_KEY = normalizePlusApiKey(plusKey, "settings env.PLUS_API_KEY")!;
+  }
 
   const model =
     trimString(systemEnv.MODEL) ||

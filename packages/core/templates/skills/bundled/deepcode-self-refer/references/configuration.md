@@ -279,6 +279,10 @@ DEEPCODE_TELEMETRY_ENABLED=0 deepcode
 
 ## DeepCode PLUS 订阅与 LLM 通道
 
+运行 `deepcode --plus`，按提示输入 DeepCode Plus API Key。验证通过后，Key 会保存到 `~/.deepcode-plus/settings.json`，随后命令退出；已有的 `subscriptionPlan` 和其他配置会保留。格式错误、不可用或暂时无法验证的 Key 不会保存。该命令需要交互终端，不能与提问或恢复会话参数一起使用。
+
+也可以在用户级或项目级 `settings.json` 的 `env.PLUS_API_KEY` 中配置 Key。核心功能按以下优先级选择 Key：`DEEPCODE_PLUS_API_KEY` 环境变量 → 项目级配置 → 用户级配置 → 独立 Plus 配置。使用前三种来源时，订阅策略按 `default` 处理，覆盖独立 Plus 配置中的 `subscriptionPlan`。最高优先级的 Key 格式无效时会报错，不会回退到其他来源。内置图片、视频生成脚本仍只读取独立 Plus 配置。
+
 PLUS 独立配置文件为 `~/.deepcode-plus/settings.json`：
 
 ```json

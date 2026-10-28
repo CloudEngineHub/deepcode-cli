@@ -2,6 +2,28 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseArguments, isValidSessionId } from "../cli-args";
 
+test("parseArguments supports --plus as an independent configuration command", async () => {
+  assert.equal((await parseArguments(["--plus"])).plus, true);
+  assert.equal((await parseArguments([])).plus, false);
+});
+
+for (const flags of [
+  ["-p", "hello"],
+  ["hello"],
+  ["-x"],
+  ["--json"],
+  ["--session-id", "test"],
+  ["-r"],
+  ["-f"],
+  ["-l"],
+]) {
+  test(`--plus rejects conversation flags: ${flags.join(" ")}`, async () => {
+    await withMockedExit(async () => {
+      await assert.rejects(parseArguments(["--plus", ...flags]), /process.exit\(1\)/);
+    });
+  });
+}
+
 // ── isValidSessionId ─────────────────────────────────────────────────────────
 
 test("isValidSessionId accepts valid UUID", () => {

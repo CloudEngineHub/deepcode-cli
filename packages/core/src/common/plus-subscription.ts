@@ -62,6 +62,39 @@ export function readDeepcodePlusApiKey(settingsPath: string = getDeepcodePlusSet
   return readDeepcodePlusSettings(settingsPath).apiKey;
 }
 
+export function resolveEffectivePlusSettings(
+  settings: { env?: Record<string, string> },
+  readSettings: () => DeepcodePlusSettings = readDeepcodePlusSettings
+): DeepcodePlusSettings {
+  if (settings.env?.PLUS_API_KEY !== undefined) {
+    return {
+      apiKey: normalizePlusApiKey(settings.env.PLUS_API_KEY, "settings env.PLUS_API_KEY"),
+      subscriptionPlan: "default",
+    };
+  }
+  return readSettings();
+}
+
+export function writeDeepcodePlusApiKey(apiKey: string, settingsPath: string = getDeepcodePlusSettingsPath()): void {
+  const key = normalizePlusApiKey(apiKey, settingsPath);
+  let settings: Record<string, unknown> = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error(`Unable to read ${settingsPath}.`);
+    }
+  }
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (!isObject(settings) || (settings.env !== undefined && !isObject(settings.env))) {
+    throw new Error(`Invalid settings in ${settingsPath}.`);
+  }
+  settings.env = { ...(settings.env as Record<string, unknown> | undefined), PLUS_API_KEY: key };
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
 export const DEEPCODE_PLUS_BASE_URL = `${DEEPCODE_PLUS_LEGACY_HOST}/plugin/openai`;
 export type PlusSubscriptionStatus = "api only" | "full ability" | "unknown";
 export type OpenAIConnection = {
@@ -149,7 +182,7 @@ export async function checkPlusSubscription(
 
 /** Keep the selected credentials stable for every LLM call within a turn. */
 export function withPlusSubscription(
-  getSettings: () => { apiKey?: string; baseURL: string },
+  getSettings: () => { apiKey?: string; baseURL: string; env?: Record<string, string> },
   buildClient: (context: OpenAIConnectionContext) => OpenAIClientResult,
   dependencies: {
     readSettings?: () => DeepcodePlusSettings;
@@ -158,15 +191,16 @@ export function withPlusSubscription(
 ): CreateOpenAIClient {
   const readSettings = dependencies.readSettings ?? readDeepcodePlusSettings;
   const checkSubscription = dependencies.checkSubscription ?? checkPlusSubscription;
+  const readEffectiveSettings = () => resolveEffectivePlusSettings(getSettings(), readSettings);
   let prepared: OpenAIConnectionContext | undefined;
   const resolve = (plus: DeepcodePlusSettings, status: PlusSubscriptionStatus): OpenAIConnectionContext => ({
     connection: resolveOpenAIConnection(getSettings(), plus.apiKey, plus.subscriptionPlan, status),
     plusApiKey: plus.apiKey,
   });
-  return Object.assign(() => buildClient(prepared ?? resolve(readSettings(), "unknown")), {
+  return Object.assign(() => buildClient(prepared ?? resolve(readEffectiveSettings(), "unknown")), {
     prepare: async (signal?: AbortSignal) => {
       signal?.throwIfAborted();
-      const settings = readSettings();
+      const settings = readEffectiveSettings();
       const plus = { ...settings, apiKey: normalizePlusApiKey(settings.apiKey) };
       const status =
         plus.subscriptionPlan === "default" && plus.apiKey ? await checkSubscription(plus.apiKey, signal) : "unknown";

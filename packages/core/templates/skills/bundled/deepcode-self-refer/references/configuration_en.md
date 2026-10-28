@@ -277,6 +277,10 @@ Applied in the following priority order (lower-numbered overridden by higher-num
 
 ## DeepCode PLUS subscription and LLM routing
 
+Run `deepcode --plus` and enter your DeepCode Plus API Key. After successful verification, the command saves the key to `~/.deepcode-plus/settings.json` and exits, preserving the existing `subscriptionPlan` and other settings. Invalid, unavailable, or unverifiable keys are not saved. This command requires an interactive terminal and cannot be combined with prompt or session options.
+
+You can also set `env.PLUS_API_KEY` in user or project `settings.json`. Core features select the key in this order: `DEEPCODE_PLUS_API_KEY` environment variable → project settings → user settings → the separate Plus settings file. The first three sources also select the `default` subscription policy, overriding `subscriptionPlan` in the separate file. An invalid key from the highest-priority source causes an error instead of falling back. Bundled image and video generation scripts still read only the separate Plus settings file.
+
 Configure PLUS separately in `~/.deepcode-plus/settings.json`:
 
 ```json

@@ -10,6 +10,7 @@ import { writeStderrLine, writeStdoutLine } from "./utils/stdio-helpers";
 import { getPackageJson } from "./utils/package";
 import { CLI_VERSION } from "./generated/git-commit";
 import { runExecMode } from "./exec-runner";
+import { runPlusSetup } from "./plus-setup";
 
 void main();
 
@@ -21,6 +22,11 @@ async function main(): Promise<void> {
   // but with .exitProcess(false) we need to exit manually.
   if (parsed.version || parsed.help) {
     process.exit(0);
+  }
+
+  if (parsed.plus) {
+    process.exitCode = await runPlusSetup();
+    return;
   }
 
   // Configure Windows shell AFTER --version/--help handling.

@@ -3,8 +3,13 @@ import * as os from "os";
 import * as path from "path";
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
-import { readDeepcodePlusSettings, resolveCurrentSettings, type ReasoningEffort } from "../settings";
-import { resolveOpenAIConnection, withPlusSubscription, type OpenAIConnectionContext } from "./plus-subscription";
+import { resolveCurrentSettings, type ReasoningEffort } from "../settings";
+import {
+  resolveEffectivePlusSettings,
+  resolveOpenAIConnection,
+  withPlusSubscription,
+  type OpenAIConnectionContext,
+} from "./plus-subscription";
 import type { CreateOpenAIClient } from "./tool-types";
 export { resolveOpenAIConnection, DEEPCODE_PLUS_BASE_URL } from "./plus-subscription";
 
@@ -51,7 +56,7 @@ export function createOpenAIClient(
   configurationError?: string;
 } {
   const settings = resolveCurrentSettings(projectRoot);
-  const plusSettings = context ? undefined : readDeepcodePlusSettings();
+  const plusSettings = context ? undefined : resolveEffectivePlusSettings(settings);
   const plusApiKey = context ? context.plusApiKey : plusSettings?.apiKey;
   const connection =
     context?.connection ?? resolveOpenAIConnection(settings, plusApiKey, plusSettings?.subscriptionPlan);
