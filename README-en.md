@@ -124,10 +124,6 @@ Non-multimodal models such as `deepseek-v4-pro` and `deepseek-v4-flash` continue
 
 By default, images are sent inline as base64. With `filesApiEnabled`, Deep Code uploads images through the DeepSeek Files API and reuses the `file_id` in subsequent requests. See [docs/configuration_en.md](docs/configuration_en.md#deepseek-files-api).
 
-### How to automatically send a Slack message after a task completes?
-
-Write a shell notification script that calls a Slack webhook, then set the `notify` field in `~/.deepcode/settings.json` to the full path of the script. For detailed steps, see [docs/notify_en.md](docs/notify_en.md).
-
 ### How do I enable web search?
 
 Deep Code comes with a built-in, free Web Search tool that works well for most use cases. If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For detailed steps, refer to: https://github.com/qorzj/web_search_cli
@@ -155,7 +151,7 @@ For detailed setup instructions, see: [docs/mcp.md](docs/mcp.md)
 
 ### How to configure Deep Code to send notifications after a task completes?
 
-When the AI assistant completes a task, Deep Code can automatically execute a notification script to send the task results to the specified channel (e.g., Slack, system notifications, etc.).
+Set the `notify` field in `~/.deepcode/settings.json` to the full path of an executable notification script. After the AI assistant completes a task, Deep Code runs the script to send a message to a channel such as Slack or display a system notification.
 
 For detailed configuration instructions, see: [docs/notify_en.md](docs/notify_en.md)
 

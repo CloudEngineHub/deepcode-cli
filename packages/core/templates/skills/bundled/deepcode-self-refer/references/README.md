@@ -117,10 +117,6 @@ Skills 会按以下优先级扫描：
 
 默认情况下，图片会以 base64 内联发送给模型。启用 `filesApiEnabled` 后，Deep Code 会使用 DeepSeek Files API 上传图片并在请求中复用 `file_id`。
 
-### 怎样在任务完成后自动给 Slack 发消息？
-
-编写一个调用 Slack webhook 的 Shell 通知脚本，然后在 `~/.deepcode/settings.json` 中将 `notify` 字段设为该脚本的完整路径即可。详细步骤请参考 [docs/notify.md](docs/notify.md)。
-
 ### 怎样启用联网搜索功能？
 
 Deep Code自带免费的、且大部分情况够用的Web Search工具。如果你希望使用自定义脚本进行联网搜索，可以在 `~/.deepcode/settings.json` 中将 `webSearchTool` 设为脚本的完整路径即可。详细步骤可参考：https://github.com/qorzj/web_search_cli
@@ -133,7 +129,7 @@ Deep Code 支持 MCP（Model Context Protocol），可以连接 GitHub、浏览�
 
 ### 如何配置 Deep Code 任务完成后发送通知？
 
-当 AI 助手完成一轮任务后，Deep Code 可以自动执行一个通知脚本，将任务结果发送到你指定的渠道（如 Slack、系统通知等）。
+在 `~/.deepcode/settings.json` 中，将 `notify` 字段设为可执行通知脚本的完整路径。AI 助手完成一轮任务后，Deep Code 会自动执行该脚本，向 Slack 等渠道发送消息或弹出系统通知。
 
 详细配置指南：[docs/notify.md](docs/notify.md)
 

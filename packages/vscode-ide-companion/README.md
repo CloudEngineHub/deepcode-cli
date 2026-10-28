@@ -69,9 +69,11 @@ npm install -g @vegamo/deepcode-cli
 
 默认情况下，图片会以base64内联发送给模型。启用`filesApiEnabled`后，Deep Code会使用DeepSeek Files API上传图片并在请求中复用`file_id`。详见 [docs/configuration.md](../../docs/configuration.md#deepseek-files-api)。
 
-### 怎样在任务完成后自动给Slack发消息？
+### 如何配置 Deep Code 任务完成后发送通知？
 
-编写一个调用Slack webhook的Shell通知脚本，然后在`~/.deepcode/settings.json`中将`notify`字段设为该脚本的完整路径即可。详细步骤可参考：https://binfer.net/share/jby5xnc-so6g
+在 `~/.deepcode/settings.json` 中，将 `notify` 字段设为可执行通知脚本的完整路径。AI 助手完成一轮任务后，Deep Code 会自动执行该脚本，向 Slack 等渠道发送消息或弹出系统通知。
+
+详细配置指南：https://binfer.net/share/jby5xnc-so6g
 
 ### 是否支持Coding Plan？
 
