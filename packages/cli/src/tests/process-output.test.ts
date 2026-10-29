@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { PassThrough, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
-import { stripVTControlCharacters } from "node:util";
-import { stripTerminalOutput } from "./terminal-output";
+import { stripTerminalControls } from "./terminal-output";
 import React from "react";
 import { Box, render } from "ink";
 import stringWidth from "string-width";
@@ -71,7 +70,7 @@ test("output tabs align to eight columns with wide characters and ANSI colors", 
 test("wrapped output preserves Unicode, blank lines, indentation and ANSI styles", () => {
   const text = "中文👩‍💻".repeat(8);
   const lines = wrapProcessOutputLines(`\u001b[31m${text}\u001b[0m\n\n  end`, 12);
-  assert.equal(lines.slice(0, -2).map(stripVTControlCharacters).join(""), text);
+  assert.equal(lines.slice(0, -2).map(stripTerminalControls).join(""), text);
   assert.deepEqual(lines.slice(-2), ["", "  end"]);
   assert.ok(lines.every((line) => stringWidth(line) <= 12));
   assert.ok(lines[1].startsWith("\u001b[31m"));
@@ -83,7 +82,7 @@ async function terminal(t: TestContext, element: React.ReactElement) {
   const stdout = Object.assign(
     new Writable({
       write(chunk, _encoding, done) {
-        const text = stripTerminalOutput(chunk.toString());
+        const text = stripTerminalControls(chunk.toString());
         if (text.trim()) frame = text;
         done();
       },

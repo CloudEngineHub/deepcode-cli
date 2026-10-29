@@ -1,7 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 
-export function stripTerminalOutput(text: string): string {
-  // Node's stripper leaves text behind for private CSI parameters such as >4;1m.
-  // Remove complete CSI sequences before stripping the remaining VT controls.
-  return stripVTControlCharacters(text.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, ""));
+export function stripTerminalControls(value: string): string {
+  // Node's ANSI stripper leaves text behind for private CSI parameters,
+  // including the modifyOtherKeys sequences emitted by the prompt input.
+  return stripVTControlCharacters(value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, ""));
 }
