@@ -25,6 +25,7 @@ function createSettings(
 ): ResolvedDeepcodingSettings {
   return {
     env: {},
+    history: { persistence: "none", maxBytes: 10485760 },
     baseURL: "https://example.invalid",
     model: "test-model",
     contextWindow: 256 * 1024,

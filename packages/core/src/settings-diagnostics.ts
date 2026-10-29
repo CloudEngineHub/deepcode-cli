@@ -1,3 +1,4 @@
+import { resolveHistorySettings, type HistorySettings } from "./common/message-history";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -140,6 +141,15 @@ export function inspectSettings(options: {
         detail: `${file.path}: ${error instanceof Error ? error.message : "Invalid retention settings."}`,
       });
     }
+    try {
+      resolveHistorySettings(file.value.history as HistorySettings | undefined);
+    } catch (error) {
+      checks.push({
+        status: "FAIL",
+        name: "History settings",
+        detail: `${file.path}: ${error instanceof Error ? error.message : "Invalid history settings."}`,
+      });
+    }
     const knownFields = new Set([
       "env",
       "contextWindow",
@@ -165,6 +175,7 @@ export function inspectSettings(options: {
       "permissions",
       "enabledSkills",
       "statusline",
+      "history",
     ]);
     for (const key of Object.keys(file.value))
       if (!knownFields.has(key))

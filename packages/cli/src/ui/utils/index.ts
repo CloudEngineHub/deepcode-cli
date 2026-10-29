@@ -1,3 +1,4 @@
+import { isUserHistoryMessage } from "@vegamo/deepcode-core";
 import chalk from "chalk";
 import { renderMessageToStdout } from "../components/MessageView/utils";
 import type { RawMode } from "../contexts";
@@ -52,8 +53,8 @@ export function buildSyntheticUserMessage(content: string, imageCount: number, m
 
 export function buildPromptHistory(messages: SessionMessage[]): string[] {
   return messages
-    .filter((message) => message.role === "user" && message.visible && typeof message.content === "string")
-    .map((message) => (message.content ?? "").trim())
+    .filter(isUserHistoryMessage)
+    .map((message) => message.content ?? "")
     .filter((content) => content.length > 0);
 }
 

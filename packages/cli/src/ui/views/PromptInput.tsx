@@ -1,3 +1,5 @@
+import { useHistorySearch, isHistorySearchShortcut } from "../hooks/useHistorySearch";
+import { historySearchFooter, historyMatchRange } from "../core/history-search-display";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import type { DOMElement } from "ink";
@@ -160,6 +162,11 @@ export const PromptInput = React.memo(function PromptInput({
 }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const inputTextRef = useRef<DOMElement | null>(null);
+  const searchTextRef = useRef<DOMElement | null>(null);
+  const historySearch = useHistorySearch();
+  const search = historySearch.view;
+  const closeHistorySearch = historySearch.close;
+  const searchFooter = historySearchFooter(search?.query ?? "", screenWidth);
   const [buffer, setBuffer] = useState<PromptBufferState>(EMPTY_BUFFER);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<SkillInfo[]>([]);
@@ -196,6 +203,7 @@ export const PromptInput = React.memo(function PromptInput({
     [fileMentionItems, fileMentionToken]
   );
   const showFileMentionMenu =
+    !search &&
     !showSkillsDropdown &&
     !showModelDropdown &&
     !permissionEdit &&
@@ -206,12 +214,13 @@ export const PromptInput = React.memo(function PromptInput({
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
-      showSkillsDropdown || showModelDropdown || permissionEdit || openRawModelDropdown || showFileMentionMenu
+      search || showSkillsDropdown || showModelDropdown || permissionEdit || openRawModelDropdown || showFileMentionMenu
         ? []
         : slashToken
           ? filterSlashCommands(slashItems, slashToken)
           : [],
     [
+      search,
       showSkillsDropdown,
       showModelDropdown,
       permissionEdit,
@@ -267,12 +276,12 @@ export const PromptInput = React.memo(function PromptInput({
   useTerminalExtendedKeys(stdout, !disabled);
   useBracketedPaste(stdout, !disabled);
   const terminalCursorActive = usePromptTerminalCursor(
-    inputTextRef,
-    cursorPlacement,
-    !busy && usePositionedCursor,
-    promptCursorLayoutKey
+    search ? searchTextRef : inputTextRef,
+    search ? { row: 0, column: searchFooter.column } : cursorPlacement,
+    search ? !disabled && hasTerminalFocus && Boolean(stdout.isTTY) : !busy && usePositionedCursor,
+    `${promptCursorLayoutKey}:${search ? "search" : "input"}`
   );
-  useHiddenTerminalCursor(stdout, !disabled && (busy || !terminalCursorActive));
+  useHiddenTerminalCursor(stdout, !disabled && ((!search && busy) || !terminalCursorActive));
 
   const refreshFileMentionItems = React.useCallback(() => {
     setFileMentionItems(scanFileMentionItems(projectRoot));
@@ -324,6 +333,7 @@ export const PromptInput = React.memo(function PromptInput({
     if (!promptDraft || appliedDraftNonceRef.current === promptDraft.nonce) {
       return;
     }
+    closeHistorySearch();
     appliedDraftNonceRef.current = promptDraft.nonce;
     setBuffer({ text: promptDraft.text, cursor: promptDraft.text.length });
     setImageUrls(promptDraft.imageUrls);
@@ -335,7 +345,7 @@ export const PromptInput = React.memo(function PromptInput({
     clearPromptUndoRedoState(undoRedoRef.current);
     resetPastes();
     onPromptDraftApplied(promptDraft.nonce);
-  }, [promptDraft, onPromptDraftApplied, exitHistoryBrowsing, resetPastes]);
+  }, [promptDraft, onPromptDraftApplied, exitHistoryBrowsing, resetPastes, closeHistorySearch]);
 
   useEffect(() => {
     exitHistoryBrowsing();
@@ -356,6 +366,22 @@ export const PromptInput = React.memo(function PromptInput({
         return;
       }
 
+      if (
+        historySearch.handleKey(input, key, (text) => {
+          setBuffer({ text, cursor: text.length });
+          setImageUrls([]);
+          setSelectedSkills([]);
+          resetPastes();
+          clearUndoRedoStacks();
+          exitHistoryBrowsing();
+        })
+      )
+        return;
+
+      // Acceptance/cancellation can be followed by more keys in the same packet.
+      // Wait for the new draft to render before normal submission sees those keys.
+      if (search) return;
+
       if (permissionEdit) {
         return;
       }
@@ -374,10 +400,12 @@ export const PromptInput = React.memo(function PromptInput({
         return;
       }
 
-      if (isRawModeShortcut(input, key)) {
-        setShowSkillsDropdown(false);
-        setShowModelDropdown(false);
-        setOpenRawModelDropdown(true);
+      if (isHistorySearchShortcut(input, key)) {
+        if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) return;
+        exitHistoryBrowsing();
+        setPendingExit(false);
+        setStatusMessage(null);
+        historySearch.begin(promptHistory);
         return;
       }
 
@@ -854,17 +882,17 @@ export const PromptInput = React.memo(function PromptInput({
   }
 
   const matchedCommand = slashToken ? findExactSlashCommand(slashItems, slashToken) : null;
-  const inlineHint = matchedCommand?.args ? ` ${matchedCommand.args.join(ARGS_SEPARATOR)}` : "";
+  const inlineHint = !search && matchedCommand?.args ? ` ${matchedCommand.args.join(ARGS_SEPARATOR)}` : "";
 
   return (
     <Box flexDirection="column" width={screenWidth}>
-      {imageUrls.length > 0 ? (
+      {(!search || search.preview === null) && imageUrls.length > 0 ? (
         <Box>
           <Text color="magenta">{formatImageAttachmentStatus(imageUrls.length)}</Text>
           <Text dimColor>{` (${IMAGE_ATTACHMENT_CLEAR_HINT})`}</Text>
         </Box>
       ) : null}
-      {selectedSkills.length > 0 ? (
+      {(!search || search.preview === null) && selectedSkills.length > 0 ? (
         <Box>
           <Text color="magenta" wrap="truncate-end">
             {formatSelectedSkillsStatus(selectedSkills)}
@@ -891,12 +919,16 @@ export const PromptInput = React.memo(function PromptInput({
         <PromptPrefixLine />
         <Box ref={inputTextRef} flexGrow={1} flexShrink={1} width={inputContentWidth}>
           <Text wrap="hard">
-            {renderBufferWithCursor(
-              buffer,
-              !disabled && hasTerminalFocus,
-              placeholder,
-              pastesRef.current,
-              !busy && !terminalCursorActive
+            {search?.preview !== null && search?.preview !== undefined ? (
+              <HistoryPreview text={search.preview} query={search.query} />
+            ) : (
+              renderBufferWithCursor(
+                buffer,
+                !disabled && hasTerminalFocus && !search,
+                placeholder,
+                pastesRef.current,
+                !busy && !terminalCursorActive && !search
+              )
             )}
           </Text>
           {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
@@ -947,7 +979,31 @@ export const PromptInput = React.memo(function PromptInput({
         onSelect={insertFileMentionSelection}
       />
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
-      {!showFooterText && (
+      {search && (
+        <Box ref={searchTextRef} width={screenWidth}>
+          <Box flexShrink={0} width={searchFooter.column + 1}>
+            <Text wrap="truncate-end">
+              <Text dimColor>{searchFooter.prefix}</Text>
+              <Text color="cyan">{searchFooter.query}</Text>
+              <Text inverse={!disabled && hasTerminalFocus && !terminalCursorActive}> </Text>
+            </Text>
+          </Box>
+          {screenWidth > searchFooter.column + 1 && (
+            <Box width={screenWidth - searchFooter.column - 1}>
+              <Text dimColor wrap="truncate-end">
+                {search.status === "no-match"
+                  ? " no match"
+                  : search.status === "unavailable"
+                    ? " history unavailable"
+                    : search.status === "searching"
+                      ? " searching…"
+                      : ""}
+              </Text>
+            </Box>
+          )}
+        </Box>
+      )}
+      {!search && !showFooterText && (
         <Box>
           <Text dimColor wrap="truncate-end">
             {footerText}
@@ -1043,8 +1099,16 @@ export function isClearImageAttachmentsShortcut(input: string, key: Pick<InputKe
   return key.ctrl && (input === "x" || input === "X");
 }
 
-export function isRawModeShortcut(input: string, key: Pick<InputKey, "ctrl">): boolean {
-  return key.ctrl && (input === "r" || input === "R");
+function HistoryPreview({ text, query }: { text: string; query: string }): React.ReactElement {
+  const match = historyMatchRange(text, query);
+  if (!match) return <Text>{text}</Text>;
+  return (
+    <Text>
+      {text.slice(0, match.start)}
+      <Text inverse>{text.slice(match.start, match.end)}</Text>
+      {text.slice(match.end)}
+    </Text>
+  );
 }
 
 export type PromptReturnKeyAction = "submit" | "newline" | null;

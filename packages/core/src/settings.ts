@@ -1,3 +1,4 @@
+import { resolveHistorySettings, type HistorySettings, type ResolvedHistorySettings } from "./common/message-history";
 import { DEEPSEEK_V4_MODELS, defaultsToThinkingMode, type MultimodalMode } from "./common/model-capabilities";
 import * as fs from "fs";
 import * as os from "os";
@@ -88,6 +89,7 @@ export type ResolvedStatusLineSettings = {
 };
 
 export type DeepcodingSettings = {
+  history?: HistorySettings;
   env?: DeepcodingEnv;
   contextWindow?: number | string;
   autoCompactWindow?: number | string;
@@ -115,6 +117,7 @@ export type DeepcodingSettings = {
 };
 
 export type ResolvedDeepcodingSettings = {
+  history: ResolvedHistorySettings;
   env: Record<string, string>;
   apiKey?: string;
   baseURL: string;
@@ -964,6 +967,15 @@ export function resolveSettingsSources(
           : ["default"];
     }
     if (baseURL !== DEFAULT_BASE_URL) trace.sources.filesApiEnabled = ["derived from baseURL"];
+    for (const key of ["persistence", "maxBytes"] as const) {
+      trace.sources[`history.${key}`] = [
+        projectSettings?.history?.[key] !== undefined
+          ? `project.history.${key}`
+          : userSettings?.history?.[key] !== undefined
+            ? `user.history.${key}`
+            : "default",
+      ];
+    }
     traceMergedSettings(trace, userSettings, projectSettings, userEnv, projectEnv, systemEnv);
   }
 
@@ -994,6 +1006,7 @@ export function resolveSettingsSources(
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
     statusline: mergeStatusLine(userSettings, projectSettings),
+    history: resolveHistorySettings(userSettings?.history, projectSettings?.history),
   };
 }
 

@@ -191,3 +191,21 @@ export type { PlusSubscriptionStatus, OpenAIConnection, OpenAIConnectionContext 
 
 export { getDiffDetails, getDiffFilePath, parseLegacyDiffPreview } from "./common/diff-preview";
 export type { DiffDetails, DiffLine } from "./common/diff-preview";
+
+export {
+  appendHistoryEntry,
+  getMessageHistoryPath,
+  getHistoryRevision,
+  readHistoryBatch,
+  HistoryChangedError,
+  isUserHistoryMessage,
+  resolveHistorySettings,
+  DEFAULT_HISTORY_SETTINGS,
+} from "./common/message-history";
+export type {
+  HistorySettings,
+  ResolvedHistorySettings,
+  HistoryEntry,
+  HistoryCursor,
+  HistoryBatch,
+} from "./common/message-history";

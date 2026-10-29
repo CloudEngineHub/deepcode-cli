@@ -139,3 +139,18 @@ test("doctor identifies invalid retention by file and ignored nested configurati
       source
     );
 });
+
+test("doctor recognizes history settings, traces overrides, and reports invalid values", (t) => {
+  const f = fixture(t);
+  f.write(f.user, { history: { persistence: "none", maxBytes: 2000 } });
+  f.write(f.project, { history: { maxBytes: 0 } });
+  const report = inspectSettings(f);
+  assert.deepEqual(report.settings?.history, { persistence: "none", maxBytes: 0 });
+  assert.deepEqual(report.trace.sources["history.persistence"], ["user.history.persistence"]);
+  assert.deepEqual(report.trace.sources["history.maxBytes"], ["project.history.maxBytes"]);
+  assert.ok(
+    !report.checks.some((check) => check.name === "Unknown configuration field" && check.detail.includes("history"))
+  );
+  f.write(f.project, { history: { maxBytes: -1 } });
+  assert.ok(inspectSettings(f).checks.some((check) => check.name === "History settings" && check.status === "FAIL"));
+});
