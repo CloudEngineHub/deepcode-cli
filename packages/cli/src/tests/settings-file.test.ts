@@ -59,9 +59,10 @@ for (const hasProject of [true, false]) {
     assert.match(h.frame(), /deepseek-v4-pro/);
     await h.send("/model");
     await h.send("\r");
-    assert.match(h.frame(), hasProject ? /All Projects +\[This Project\]/ : /\[All Projects\] +This Project/);
+    assert.doesNotMatch(h.frame(), /Remember this choice|All Projects|This Project/);
     await h.send("\u001b[A"); // Select the preceding model (deepseek-flash).
     await h.send("\r");
+    assert.match(h.frame(), hasProject ? /All Projects +\[This Project\]/ : /\[All Projects\] +This Project/);
     await h.send("\r");
     const targetFile = hasProject ? projectFile : userFile;
     assert.equal(JSON.parse(fs.readFileSync(targetFile, "utf8")).model, "deepseek-flash");

@@ -69,14 +69,17 @@ test("default mode returns home with a draft and saves only from home", async (t
   assert.match(h.frame(), /> defaultMode +askAll/);
   assert.match(h.frame(), /scopes +│/);
   assert.match(h.frame(), /Save +│/);
+  assert.match(h.frame(), /Remember this choice/);
   assert.doesNotMatch(h.frame(), /Tab/);
   await h.send(ENTER);
+  assert.doesNotMatch(h.frame(), /Remember this choice/);
   assert.match(h.frame(), /> ● askAll/);
   assert.match(h.frame(), /askAll +│/);
   assert.match(h.frame(), /allowAll +│/);
   await h.send(DOWN);
   await h.send(" ");
   assert.match(h.frame(), /Permissions · User/);
+  assert.match(h.frame(), /Remember this choice/);
   assert.match(h.frame(), /> defaultMode +allowAll/);
   assert.deepEqual(h.saves, []);
   assert.equal(h.closed(), 0);
@@ -95,7 +98,9 @@ test("scope edits accumulate, preserve list position and save only after Save", 
   await h.send(DOWN);
   await h.send(ENTER);
   assert.doesNotMatch(h.frame(), /Save/);
+  assert.doesNotMatch(h.frame(), /Remember this choice/);
   await h.send(ENTER);
+  assert.doesNotMatch(h.frame(), /Remember this choice/);
   assert.match(h.frame(), /> ● default/);
   await h.send(DOWN); // wrap from default to allow
   await h.send(ENTER);
@@ -108,6 +113,7 @@ test("scope edits accumulate, preserve list position and save only after Save", 
   assert.match(h.frame(), /> read-in-tmp/);
   assert.deepEqual(h.saves, []);
   await h.send(ESC); // home retains the draft
+  assert.match(h.frame(), /Remember this choice/);
   await h.send(DOWN);
   assert.match(h.frame(), /> Save/);
   await h.send(ENTER);
@@ -448,9 +454,10 @@ test("slash command opens the editor, persists settings, and isolates menu keys 
   assert.equal(planModeChanges, 0);
   await h.send("/model");
   await h.send(ENTER);
+  assert.doesNotMatch(h.frame(), /Remember this choice|All Projects|This Project/);
+  await h.send(ENTER);
   assert.match(h.frame(), /All Projects +\[This Project\]/);
   await h.send(LEFT);
-  await h.send(ENTER);
   await h.send(ENTER);
   assert.deepEqual(modelSaves, [
     { selection: { model: "deepseek-flash", thinkingEnabled: false, reasoningEffort: "high" }, target: "user" },

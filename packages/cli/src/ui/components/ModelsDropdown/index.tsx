@@ -126,7 +126,7 @@ const ModelsDropdown: React.FC<Props> = ({
 
       const optionCount = step === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
 
-      if (step === "model" && !key.ctrl && !key.meta && !key.shift && (key.leftArrow || key.rightArrow)) {
+      if (step === "thinking" && !key.ctrl && !key.meta && !key.shift && (key.leftArrow || key.rightArrow)) {
         setTarget(key.leftArrow ? "user" : "project");
         return;
       }
@@ -178,7 +178,7 @@ const ModelsDropdown: React.FC<Props> = ({
       activeIndex={activeIndex}
       activeColor="#229ac3"
       maxVisible={6}
-      footer={step === "model" ? <SaveScopeSelector target={target} /> : undefined}
+      footer={step === "thinking" ? <SaveScopeSelector target={target} /> : undefined}
     />
   );
 };

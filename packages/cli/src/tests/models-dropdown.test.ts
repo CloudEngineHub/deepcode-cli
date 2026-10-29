@@ -64,7 +64,7 @@ test("model dropdown offers all reasoning effort levels", () => {
   assert.equal(getThinkingOptionIndex({ thinkingEnabled: true, reasoningEffort: "low" }), 2);
 });
 
-test("model scope selector is gray, retains the model cursor and carries the destination to thinking confirmation", async (t) => {
+test("model scope selector is only active on thinking confirmation and retains the thinking cursor", async (t) => {
   const inkRequire = createRequire(createRequire(import.meta.url).resolve("ink"));
   const { default: chalk } = await import(pathToFileURL(inkRequire.resolve("chalk")).href);
   const level = chalk.level;
@@ -73,21 +73,27 @@ test("model scope selector is gray, retains the model cursor and carries the des
     chalk.level = level;
   });
   const h = await editor(t, true);
-  assert.match(h.frame(), /All Projects +\[This Project\]/);
-  assert.match(h.rawFrame(), /\u001b\[90mRemember this choice for {2}\(←→ to switch\)/);
-  assert.ok(h.frame().indexOf("Remember this choice") < h.frame().indexOf("Space/Enter select model"));
+  assert.doesNotMatch(h.frame(), /Remember this choice|All Projects|This Project/);
   await h.send(DOWN);
-  await h.send(LEFT);
-  assert.match(h.frame(), /\[All Projects\] +This Project/);
+  await h.send(LEFT); // Scope cannot change while hidden.
   assert.match(h.frame(), /> ○ deepseek-v4-pro/);
-  await h.send(LEFT);
-  assert.match(h.frame(), /\[All Projects\]/);
   assert.deepEqual(h.saves, []);
   await h.send(ENTER);
   assert.match(h.frame(), /Select Thinking Mode/);
-  assert.doesNotMatch(h.frame(), /Remember this choice/);
-  await h.send(RIGHT); // Scope cannot change while hidden.
+  assert.match(h.frame(), /All Projects +\[This Project\]/);
+  assert.match(h.rawFrame(), /\u001b\[90mRemember this choice for {2}\(←→ to switch\)/);
+  assert.ok(h.frame().indexOf("Remember this choice") < h.frame().indexOf("Space/Enter apply"));
   await h.send(DOWN);
+  await h.send(LEFT);
+  assert.match(h.frame(), /\[All Projects\] +This Project/);
+  assert.match(h.frame(), /> ○ Thinking mode \[low\]/);
+  await h.send(RIGHT);
+  assert.match(h.frame(), /All Projects +\[This Project\]/);
+  assert.match(h.frame(), /> ○ Thinking mode \[low\]/);
+  await h.send(LEFT);
+  await h.send(LEFT);
+  assert.match(h.frame(), /\[All Projects\]/);
+  assert.deepEqual(h.saves, []);
   await h.send(ENTER);
   assert.deepEqual(h.saves, [
     { selection: { model: "deepseek-v4-pro", thinkingEnabled: true, reasoningEffort: "low" }, target: "user" },
@@ -96,6 +102,9 @@ test("model scope selector is gray, retains the model cursor and carries the des
 
 test("missing project settings default to all projects and cancellation saves nothing", async (t) => {
   const h = await editor(t, false, 36);
+  assert.doesNotMatch(h.frame(), /Remember this choice|All Projects|This Project/);
+  await h.send(RIGHT); // Scope cannot change while hidden.
+  await h.send(ENTER);
   assert.match(h.frame(), /\[All Projects\] +This Project/);
   // The shared scope control must fit inside the narrow dialog.
   const scopeLines = h
@@ -112,8 +121,8 @@ test("missing project settings default to all projects and cancellation saves no
 
 test("reopening recomputes the default destination and thinking cancellation does not save", async (t) => {
   const h = await editor(t);
-  await h.send(RIGHT);
   await h.send(ENTER);
+  await h.send(RIGHT);
   await h.send(ESC);
   assert.deepEqual(h.saves, []);
   h.rerender(React.createElement(Text, null, "closed"));
@@ -122,8 +131,9 @@ test("reopening recomputes the default destination and thinking cancellation doe
   fs.writeFileSync(h.projectFile, "{}");
   h.rerender(React.createElement(h.Probe));
   await h.send("");
-  assert.match(h.frame(), /All Projects +\[This Project\]/);
+  assert.doesNotMatch(h.frame(), /Remember this choice|All Projects|This Project/);
   await h.send(ENTER);
+  assert.match(h.frame(), /All Projects +\[This Project\]/);
   await h.send(ENTER);
   assert.deepEqual(h.saves, [{ selection: current, target: "project" }]);
 });
