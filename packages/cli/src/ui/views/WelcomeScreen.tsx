@@ -43,8 +43,8 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
     <Box flexDirection="column" marginY={1}>
       <Box flexDirection="column" width={panelWidth}>
         <Box flexDirection="column" paddingX={1}>
-          <Box flexDirection="column" justifyContent="center" paddingX={1}>
-            <Box justifyContent="center" width={compact ? undefined : TITLE_PANEL_WIDTH}>
+          <Box flexDirection="column" justifyContent="center" paddingX={1} overflowX="hidden">
+            <Box justifyContent="center" width={TITLE_PANEL_WIDTH} flexShrink={0}>
               <ThemedGradient>{AsciiLogo}</ThemedGradient>
             </Box>
           </Box>

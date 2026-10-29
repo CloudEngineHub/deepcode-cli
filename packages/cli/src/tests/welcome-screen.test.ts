@@ -2,7 +2,30 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as os from "os";
 import * as path from "path";
+import React from "react";
+import { renderToString } from "ink";
+import { resolveSettingsSources } from "../../../core/src/settings";
 import { buildWelcomeTips, formatHomeRelativePath } from "../ui";
+import { AsciiLogo } from "../ui/ascii-art";
+import { WelcomeScreen } from "../ui/views/WelcomeScreen";
+import { stripTerminalControls } from "./terminal-output";
+
+test("welcome logo clips its right edge without wrapping in narrow terminals", () => {
+  const settings = resolveSettingsSources({}, {}, { model: "deepseek-flash", baseURL: "https://example.com" }, {});
+  for (const width of [40, 60, 70, 72, 80, 120]) {
+    const output = stripTerminalControls(
+      renderToString(React.createElement(WelcomeScreen, { projectRoot: "/project", settings, skills: [], width }), {
+        columns: width,
+      })
+    );
+    const logo = output.split(/\n\s*╭─/)[0].trim();
+    assert.deepEqual(
+      logo.split("\n").map((line) => line.trim()),
+      AsciiLogo.split("\n").map((line) => line.slice(0, width - 3).trim()),
+      `terminal width: ${width}`
+    );
+  }
+});
 
 test("formatHomeRelativePath returns tilde for the home directory", () => {
   const home = path.resolve("/Users/example");
