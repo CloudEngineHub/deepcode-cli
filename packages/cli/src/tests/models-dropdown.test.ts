@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import React, { useState } from "react";
 import { Text } from "ink";
 import stringWidth from "string-width";
@@ -65,7 +66,7 @@ test("model dropdown offers all reasoning effort levels", () => {
 
 test("model scope selector is gray, retains the model cursor and carries the destination to thinking confirmation", async (t) => {
   const inkRequire = createRequire(createRequire(import.meta.url).resolve("ink"));
-  const { default: chalk } = await import(inkRequire.resolve("chalk"));
+  const { default: chalk } = await import(pathToFileURL(inkRequire.resolve("chalk")).href);
   const level = chalk.level;
   chalk.level = 1;
   t.after(() => {

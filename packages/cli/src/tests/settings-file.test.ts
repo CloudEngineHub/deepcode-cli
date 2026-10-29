@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { test } from "node:test";
 import React from "react";
@@ -88,7 +88,7 @@ test("CLI rejects invalid explicit files before startup but help and version do 
   const file = path.join(root, "settings.json");
   const cli = fileURLToPath(new URL("../cli.tsx", import.meta.url));
   const config = fileURLToPath(new URL("../../tsconfig.json", import.meta.url));
-  const tsx = createRequire(import.meta.url).resolve("tsx");
+  const tsx = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
   const run = (...args: string[]) =>
     spawnSync(process.execPath, ["--import", tsx, cli, ...args], {
       cwd: root,

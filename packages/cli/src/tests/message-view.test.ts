@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import React from "react";
 import { renderToString } from "ink";
 import { parseDiffPreview } from "../ui";
@@ -391,28 +392,30 @@ test("parseToolPayload trims whitespace from name", () => {
 // Both freshly generated metadata and legacy sessions share the same presentation.
 for (const name of ["edit", "write"]) {
   test(`MessageView renders ${name} diff paths, totals and aligned line numbers`, () => {
+    const projectRoot = path.resolve("/project");
+    const relativePath = path.join("src", "example.ts");
     const message = makeSessionMessage({
       role: "tool",
       content: JSON.stringify({
         name,
         ok: true,
         metadata: {
-          file_path: "/project/src/example.ts",
+          file_path: path.join(projectRoot, relativePath),
           diff_preview: "--- a/file\n+++ b/file\n@@ -99,1 +99,2 @@\n before\n-old\n+new\n+extra\n after",
         },
       }),
     });
-    const output = renderToString(React.createElement(MessageView, { message, projectRoot: "/project", width: 80 }), {
+    const output = renderToString(React.createElement(MessageView, { message, projectRoot, width: 80 }), {
       columns: 80,
     });
-    assert.ok(output.includes("└ src/example.ts · +2 -1"), output);
+    assert.ok(output.includes(`└ ${relativePath} · +2 -1`), output);
     assert.ok(output.includes(" 98   before"), output);
     assert.ok(output.includes(" 99 - old"), output);
     assert.ok(output.includes(" 99 + new"), output);
     assert.ok(output.includes("100 + extra"), output);
     assert.ok(output.includes("101   after"), output);
     assert.ok(!output.includes("Changes"));
-    assert.ok(!output.includes("/project/"));
+    assert.ok(!output.includes(projectRoot));
   });
 }
 

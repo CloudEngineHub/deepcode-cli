@@ -5,7 +5,7 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { inspectSettings } from "@vegamo/deepcode-core/settings-diagnostics";
 import { resolvePlusLlmHost } from "@vegamo/deepcode-core/common/plus-subscription";
 import { inspectApi, formatDoctorReport, redactDoctorText } from "../doctor";
@@ -174,10 +174,10 @@ test("directory checks and PATH inspection use existing files without creating s
   const f = fixture(t);
   assert.equal(checkWritable(path.join(f.home, "not-created"), "State").status, "PASS");
   assert.equal(fs.existsSync(path.join(f.home, "not-created")), false);
-  const file = path.join(f.home, "deepcode");
+  const file = path.join(f.home, process.platform === "win32" ? "deepcode.cmd" : "deepcode");
   fs.writeFileSync(file, "test", { mode: 0o755 });
   assert.equal(checkWritable(file, "State").status, "FAIL");
-  assert.deepEqual(executablePaths("deepcode", { PATH: f.home }, "linux"), [file]);
+  assert.deepEqual(executablePaths("deepcode", { PATH: f.home }), [file]);
 });
 
 test("command runner bounds output and reports missing executables", async () => {
@@ -192,7 +192,7 @@ test("doctor bootstrap runs with broken settings, no TTY, no npm, and no normal 
   const settings = path.join(f.home, "broken.json");
   fs.writeFileSync(settings, '{"secret":"do-not-print-me", broken');
   const cli = fileURLToPath(new URL("../cli.tsx", import.meta.url));
-  const tsx = createRequire(import.meta.url).resolve("tsx");
+  const tsx = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
   const config = fileURLToPath(new URL("../../tsconfig.json", import.meta.url));
   const result = spawnSync(process.execPath, ["--import", tsx, cli, "--doctor", "--settings", settings], {
     cwd: f.home,
