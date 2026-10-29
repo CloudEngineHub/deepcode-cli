@@ -40,7 +40,8 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
   const panelWidth = compact ? undefined : Math.min(width, 72);
 
   return (
-    <Box flexDirection="column" marginY={1}>
+    // Static output does not inherit the terminal width; constrain it before clipping the logo.
+    <Box flexDirection="column" width={width} marginY={1}>
       <Box flexDirection="column" width={panelWidth}>
         <Box flexDirection="column" paddingX={1}>
           <Box flexDirection="column" justifyContent="center" paddingX={1} overflowX="hidden">
