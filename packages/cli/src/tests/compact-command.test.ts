@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { PassThrough, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
-import { stripVTControlCharacters } from "node:util";
+import { stripTerminalOutput } from "./terminal-output";
 import React from "react";
 import { render } from "ink";
 import { SessionManager, type SessionEntry, type SessionMessage } from "@vegamo/deepcode-core";
@@ -75,7 +75,7 @@ async function harness(t: TestContext, compact: (signal: AbortSignal) => Promise
   const output = Object.assign(
     new Writable({
       write(chunk, _encoding, callback) {
-        const frame = stripVTControlCharacters(chunk.toString());
+        const frame = stripTerminalOutput(chunk.toString());
         if (frame.trim()) frames.push(frame);
         callback();
       },

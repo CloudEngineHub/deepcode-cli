@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createRequire } from "node:module";
 import sharp from "sharp";
 import { TENCENT_MIRROR_REGISTRY } from "@vegamo/deepcode-core";
 import { buildSharpInstallArgs, createSharpLoader, type SharpInstallProgress } from "../sharp-loader.js";
 
 const tempDirs: string[] = [];
-const SHARP_VERSION = "0.35.3";
+const require = createRequire(import.meta.url);
+const SHARP_VERSION: string = require("sharp/package.json").version;
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {

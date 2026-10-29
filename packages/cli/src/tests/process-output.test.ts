@@ -3,6 +3,7 @@ import { PassThrough, Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
+import { stripTerminalOutput } from "./terminal-output";
 import React from "react";
 import { Box, render } from "ink";
 import stringWidth from "string-width";
@@ -82,7 +83,7 @@ async function terminal(t: TestContext, element: React.ReactElement) {
   const stdout = Object.assign(
     new Writable({
       write(chunk, _encoding, done) {
-        const text = stripVTControlCharacters(chunk.toString());
+        const text = stripTerminalOutput(chunk.toString());
         if (text.trim()) frame = text;
         done();
       },
