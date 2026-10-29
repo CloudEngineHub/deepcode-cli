@@ -10,7 +10,8 @@ import { buildSharpInstallArgs, createSharpLoader, type SharpInstallProgress } f
 
 const tempDirs: string[] = [];
 const require = createRequire(import.meta.url);
-const SHARP_VERSION: string = require("sharp/package.json").version;
+const sharpPackagePath = path.join(path.dirname(require.resolve("sharp")), "..", "package.json");
+const SHARP_VERSION: string = JSON.parse(fs.readFileSync(sharpPackagePath, "utf8")).version;
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
