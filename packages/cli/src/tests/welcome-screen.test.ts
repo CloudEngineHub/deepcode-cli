@@ -30,6 +30,7 @@ test("welcome logo clips its right edge without wrapping in narrow terminals", (
 
 test("static welcome output stays within the terminal width and keeps the settings panel aligned", () => {
   const settings = resolveSettingsSources({}, {}, { model: "deepseek-flash", baseURL: "https://example.com" }, {});
+  const projectRoot = path.resolve("/tmp");
   for (const width of [40, 60, 62, 70, 72, 73, 74, 80, 111, 112, 120]) {
     const output = stripTerminalControls(
       renderToString(
@@ -38,8 +39,7 @@ test("static welcome output stays within the terminal width and keeps the settin
           { flexDirection: "column", width },
           React.createElement(Static<string>, {
             items: ["welcome"],
-            children: (key) =>
-              React.createElement(WelcomeScreen, { key, projectRoot: "/private/tmp", settings, skills: [], width }),
+            children: (key) => React.createElement(WelcomeScreen, { key, projectRoot, settings, skills: [], width }),
           })
         ),
         { columns: width }
@@ -69,7 +69,7 @@ test("static welcome output stays within the terminal width and keeps the settin
       ["Model", settings.model],
       ["Thinking Enabled", String(settings.thinkingEnabled)],
       ["Reasoning Effort", settings.reasoningEffort],
-      ["CWD", "/private/tmp"],
+      ["CWD", projectRoot],
     ]) {
       assert.ok(
         lines.some((line) => line.includes(label) && line.includes(value)),
