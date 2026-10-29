@@ -5,7 +5,7 @@ import React, { useState } from "react";
 import { render, Text } from "ink";
 import { PassThrough, Writable } from "node:stream";
 import { setTimeout } from "node:timers/promises";
-import { stripVTControlCharacters } from "node:util";
+import { stripTerminalControls } from "./terminal-output";
 import type { AskPermissionRequest } from "@vegamo/deepcode-core";
 
 test("getScopeRiskColor maps permission scopes by risk", () => {
@@ -34,7 +34,7 @@ async function prompt(t: TestContext, requests: AskPermissionRequest[], planMode
   const stdout = Object.assign(
     new Writable({
       write(chunk, _encoding, done) {
-        const text = stripVTControlCharacters(chunk.toString());
+        const text = stripTerminalControls(chunk.toString());
         if (text.trim()) frame = text;
         done();
       },
