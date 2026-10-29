@@ -94,6 +94,48 @@ function request(id: string, scopes: AskPermissionRequest["scopes"]): AskPermiss
   return { toolCallId: id, name: "Bash", command: id, scopes };
 }
 
+test("permission diff appears above the question and follows the current request", async (t) => {
+  const first: AskPermissionRequest = {
+    ...request("first", ["write-in-cwd"]),
+    name: "edit",
+    diff: {
+      filePath: "/workspace/example.py",
+      details: {
+        added: 1,
+        removed: 1,
+        lines: [
+          { kind: "removed", content: "value = 1", lineNumber: 1 },
+          { kind: "added", content: "value = 2", lineNumber: 1 },
+        ],
+      },
+    },
+  };
+  const second: AskPermissionRequest = {
+    ...request("second", ["write-in-cwd"]),
+    name: "write",
+    diff: {
+      filePath: "/workspace/new.py",
+      details: { added: 1, removed: 0, lines: [{ kind: "added", content: "created = True", lineNumber: 1 }] },
+    },
+  };
+  const h = await prompt(t, [first, second, request("third", ["network"])]);
+  assert.match(h.frame(), /example\.py.*\+1 -1/);
+  assert.match(h.frame(), /- value = 1/);
+  assert.match(h.frame(), /\+ value = 2/);
+  assert.ok(h.frame().indexOf("value = 2") < h.frame().indexOf("Do you want to proceed?"));
+  await h.send("1");
+  assert.doesNotMatch(h.frame(), /value = /);
+  assert.match(h.frame(), /\+ created = True/);
+  await h.send("4");
+  assert.doesNotMatch(h.frame(), /created = True|new\.py/);
+  await h.send("1");
+  assert.deepEqual(h.results[0].permissions, [
+    { toolCallId: "first", permission: "allow" },
+    { toolCallId: "second", permission: "deny" },
+    { toolCallId: "third", permission: "allow" },
+  ]);
+});
+
 for (const planMode of [false, true]) {
   test(`session option works in ${planMode ? "Plan" : "normal"} mode and skips repeated scopes`, async (t) => {
     const h = await prompt(t, [request("first", ["network"]), request("second", ["network"])], planMode);

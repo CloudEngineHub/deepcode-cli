@@ -3,6 +3,8 @@ import * as path from "path";
 import type { DeepcodingSettings, PermissionScope, PermissionSettings } from "../settings";
 import type { ToolExecutionFollowUpMessage } from "./tool-types";
 import { isAbsoluteFilePath, normalizeFilePath } from "./state";
+import { buildFileDiff, readTextFileWithMetadata } from "./file-utils";
+import { getDiffDetails, type DiffDetails } from "./diff-preview";
 
 export type BashPermissionScope = Exclude<PermissionScope, "mcp"> | "unknown";
 type PermissionPolicySettings = Required<Omit<PermissionSettings, "addWorkingDirs">> &
@@ -34,6 +36,7 @@ export type AskPermissionRequest = {
   name: string;
   command: string;
   description?: string;
+  diff?: { filePath: string; details: DiffDetails };
 };
 
 export type PermissionToolCall = {
@@ -192,11 +195,59 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
         name: request.name,
         command: request.command,
         description: request.description,
+        diff: buildPermissionDiff(toolCall, options),
       });
     }
   }
 
   return { permissions, askPermissions };
+}
+
+function buildPermissionDiff(
+  toolCall: PermissionToolCall,
+  options: ComputeToolCallPermissionsOptions
+): AskPermissionRequest["diff"] {
+  const name = toolCall.function.name.toLowerCase();
+  if (name !== "write" && name !== "edit") return undefined;
+  const args = parseToolArgumentsForPermissions(toolCall.function.arguments);
+  const filePath = normalizeFilePath(
+    name === "edit"
+      ? resolveEditPermissionPath(options.sessionId, args, options.resolveSnippetPath)
+      : typeof args.file_path === "string"
+        ? args.file_path
+        : ""
+  );
+  if (!isAbsoluteFilePath(filePath)) return undefined;
+
+  try {
+    let original: string | null;
+    let updated: string;
+    if (name === "edit") {
+      if (typeof args.old_string !== "string" || typeof args.new_string !== "string") return undefined;
+      original = args.old_string;
+      updated = args.new_string;
+    } else {
+      const content = args.content;
+      if (typeof content === "string") {
+        updated = content;
+      } else if (filePath.toLowerCase().endsWith(".json") && content !== null && typeof content === "object") {
+        updated = JSON.stringify(content, null, 2);
+      } else {
+        return undefined;
+      }
+      try {
+        original = readTextFileWithMetadata(filePath).content;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        original = null;
+      }
+    }
+    const { details } = buildFileDiff(filePath, original, updated);
+    return details ? { filePath, details } : undefined;
+  } catch {
+    // A missing preview must not prevent the user from answering the permission request.
+    return undefined;
+  }
 }
 
 function getAllowedForcedAskScopes(
@@ -615,12 +666,15 @@ export function normalizeAskPermissions(value: unknown): AskPermissionRequest[] 
     const scopes = Array.isArray(record.scopes)
       ? record.scopes.filter((scope): scope is AskPermissionScope => isAskPermissionScope(scope))
       : [];
+    const diff = record.diff as AskPermissionRequest["diff"];
+    const details = getDiffDetails({ diff_details: diff?.details });
     result.push({
       toolCallId: record.toolCallId,
       scopes,
       name: record.name,
       command: typeof record.command === "string" ? record.command : record.name,
       description: typeof record.description === "string" ? record.description : undefined,
+      ...(typeof diff?.filePath === "string" && details ? { diff: { filePath: diff.filePath, details } } : {}),
     });
   }
   return result.length > 0 ? result : undefined;

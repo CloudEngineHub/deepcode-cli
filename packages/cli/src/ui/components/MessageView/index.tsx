@@ -215,7 +215,7 @@ function StatusLine({
   );
 }
 
-function DiffPreview({
+export function DiffPreview({
   lines,
   filePath,
   added,

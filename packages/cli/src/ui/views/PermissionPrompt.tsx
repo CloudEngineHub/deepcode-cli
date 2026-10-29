@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import { useTerminalInput } from "../hooks";
+import { DiffPreview } from "../components/MessageView";
 import type { AskPermissionRequest, AskPermissionScope, PermissionScope } from "@vegamo/deepcode-core";
 import {
   buildScopePrompts,
@@ -92,6 +93,19 @@ function PermissionPromptForm({ requests, planMode = false, onSubmit, onCancel }
       <Text bold>{prompt.request.name}</Text>
       <Text>{prompt.request.command}</Text>
       {prompt.request.description ? <Text color="cyanBright">{prompt.request.description}</Text> : null}
+      {prompt.request.diff ? (
+        <Box marginTop={1}>
+          <DiffPreview
+            filePath={prompt.request.diff.filePath}
+            added={prompt.request.diff.details.added}
+            removed={prompt.request.diff.details.removed}
+            lines={prompt.request.diff.details.lines.map((line) => ({
+              ...line,
+              marker: line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ",
+            }))}
+          />
+        </Box>
+      ) : null}
       <Box marginTop={1}>
         <Text>Do you want to proceed?</Text>
       </Box>
@@ -127,7 +141,7 @@ function buildOptions(scope: AskPermissionScope, planMode: boolean): PromptOptio
   if (scope !== "unknown") {
     options.push({
       kind: "session",
-      label: "Yes, during this session: ",
+      label: "Yes, during this session allow ",
       scopeDescription: describeScope(scope),
       scopeColor: getScopeRiskColor(scope),
     });
