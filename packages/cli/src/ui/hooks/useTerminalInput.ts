@@ -206,23 +206,13 @@ export function dispatchTerminalInput(
 ): void {
   const raw = String(data);
 
-  // Fix CJK composition bug on iOS terminals (Moshi, Blink, etc.).
-  // iOS keyboards can send composed characters as a single packet like:
-  //   "가\x7f나"  (character + backspace + replacement character)
-  // Do not split escape-prefixed sequences such as Alt+Backspace.
-  if (!raw.startsWith("\u001B") && raw.includes("\x7f") && raw.length > 1) {
-    const parts = raw.split("\x7f");
-    if (parts[0]) {
-      const { input, key } = parseTerminalInput(parts[0]);
+  // Terminals may coalesce a shortcut and subsequent text into one packet.
+  // Keep escape sequences intact, but dispatch standalone controls individually
+  // (also handles CJK composition's character + DEL + replacement packets).
+  if (!raw.startsWith("\u001B") && /[\x00-\x1a\x1c-\x1f\x7f]/.test(raw) && raw.length > 1) {
+    for (const part of raw.split(/([\x00-\x1a\x1c-\x1f\x7f])/).filter(Boolean)) {
+      const { input, key } = parseTerminalInput(part);
       inputHandler(input, key);
-    }
-    for (let i = 1; i < parts.length; i++) {
-      const bs = parseTerminalInput("\x7f");
-      inputHandler(bs.input, bs.key);
-      if (parts[i]) {
-        const { input, key } = parseTerminalInput(parts[i]);
-        inputHandler(input, key);
-      }
     }
     return;
   }

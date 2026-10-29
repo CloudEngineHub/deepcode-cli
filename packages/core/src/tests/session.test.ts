@@ -137,7 +137,7 @@ test("SessionManager builds hidden user messages for image follow-ups", () => {
 
   assert.equal(message.role, "user");
   assert.equal(message.visible, false);
-  assert.equal(message.meta, undefined);
+  assert.deepEqual(message.meta, { isToolFollowUp: true });
   assert.equal(message.checkpointHash, undefined);
 });
 
@@ -5543,4 +5543,37 @@ test("cancelling subscription preparation starts no LLM calls or new session", a
   } finally {
     manager.dispose();
   }
+});
+
+test("global history records user submissions once and ignores replay, system and tool messages", async () => {
+  const workspace = createTempDir("deepcode-history-session-workspace-");
+  const home = createTempDir("deepcode-history-session-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "history-test");
+  (manager as any).activateSession = async () => {};
+  const sessionId = await manager.createSession({ text: "original user prompt" });
+  await manager.replySession(sessionId, { text: "answer text", isAnswers: true });
+  manager.addSessionSystemMessage(sessionId, "system notice", true);
+  const injected = (manager as any).buildFollowUpMessage(sessionId, {
+    role: "user",
+    content: "injected",
+    visible: true,
+  });
+  (manager as any).appendSessionMessage(sessionId, injected);
+  manager.listSessionMessages(sessionId);
+  manager.setActiveSessionId(sessionId);
+  await manager.replySession(sessionId, { text: "/continue" });
+  const file = path.join(home, ".deepcode", "history.jsonl");
+  const entries = fs
+    .readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    entries.map((entry) => entry.text),
+    ["original user prompt", "answer text"]
+  );
+  assert.ok(entries.every((entry) => entry.session_id === sessionId));
+  assert.equal(injected.meta.isToolFollowUp, true);
+  manager.dispose();
 });

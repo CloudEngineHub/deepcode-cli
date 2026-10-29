@@ -110,7 +110,7 @@ function setup() {
           },
         } as any,
       }),
-      getResolvedSettings: () => ({ model: "configured-model" }),
+      getResolvedSettings: () => ({ model: "configured-model", history: { persistence: "none", maxBytes: 0 } }),
       renderMarkdown: (text) => text,
       onAssistantMessage: () => {},
     });

@@ -34,7 +34,6 @@ export {
   toggleSkillSelection,
   removeCurrentSlashToken,
   isClearImageAttachmentsShortcut,
-  isRawModeShortcut,
   getPromptReturnKeyAction,
   renderBufferWithCursor,
   buildInitPromptSubmission,
@@ -101,3 +100,5 @@ export {
 } from "./core/file-mentions";
 export { findExpandedThinkingId, isCollapsedThinking } from "./core/thinking-state";
 export { buildExitSummaryText, buildPluginRateLimitHintText, buildResumeHintText } from "./exit-summary";
+
+export { isHistorySearchShortcut } from "./hooks/useHistorySearch";

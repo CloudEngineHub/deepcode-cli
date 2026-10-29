@@ -48,6 +48,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `temperature`              | number        | 模型采样温度，范围 `0` 到 `2`                                                         |
 | `permissions`              | object        | 权限策略及 `addWorkingDirs` 额外工作目录配置（参见 [permission.md](./permission.md)） |
 | `enabledSkills`            | object        | 按 skill 名称启用或禁用 skill 的配置                                                  |
+| `history`                  | object        | 用户输入历史的保存和大小限制 |
 
 #### `env` 子字段
 
@@ -276,6 +277,26 @@ DEEPCODE_TELEMETRY_ENABLED=0 deepcode
 3. 项目级settings.json: `{"mcpServers":{"github":{"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"..."}}}}`
 4. 项目级settings.json: `{"env": {"MCP_GITHUB_PERSONAL_ACCESS_TOKEN": "..."}}`
 5. 系统环境变量: `DEEPCODE_MCP_GITHUB_PERSONAL_ACCESS_TOKEN=... deepcode`
+
+#### 输入历史与搜索
+
+按 Ctrl+R 搜索当前会话及跨会话保存的用户输入。输入关键词实时预览；Ctrl+R / ↑ 查找更早的匹配，Ctrl+S / ↓ 查找更新的匹配。Enter 将结果放入输入框继续编辑，不会发送；Esc / Ctrl+C 取消并恢复原草稿。raw 显示模式仍通过 `/raw` 选择。
+
+历史只保存实际提交的用户文本，不包含自动摘要、工具注入内容或其他角色的消息。跨会话历史位于 `~/.deepcode/history.jsonl`，可在 `settings.json` 中配置：
+
+```json
+{
+  "history": {
+    "persistence": "saveAll",
+    "maxBytes": 10485760
+  }
+}
+```
+
+- `persistence` 默认为 `"saveAll"`。设为 `"none"` 停止保存，但不删除、清空或裁剪已有文件，已有历史仍可搜索。
+- `maxBytes` 默认为 `10485760`（10 MiB），须为非负整数；`0` 表示不限制大小，仍然保存。
+- 每次追加后检查文件大小。超限时删除最旧记录，保留最近记录至上限的约 80%；最新一条始终保留，因此单条超大记录仍可能超过上限。
+- 项目配置按字段覆盖用户配置。已有会话不会自动回填到全局历史；恢复会话后可以搜索该会话的用户输入。
 
 ## DeepCode PLUS 订阅与 LLM 通道
 

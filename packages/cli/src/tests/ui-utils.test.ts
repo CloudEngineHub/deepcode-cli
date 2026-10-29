@@ -11,9 +11,11 @@ test("buildPromptHistory includes only visible non-empty user messages", () => {
     buildMessage("assistant", "assistant reply", true),
     buildMessage("user", "   ", true),
     buildMessage("user", "second prompt", true),
+    { ...buildMessage("user", "generated summary", true), meta: { isSummary: true } },
+    { ...buildMessage("user", "tool injected", true), meta: { isToolFollowUp: true } },
   ];
 
-  assert.deepEqual(buildPromptHistory(messages), ["first prompt", "second prompt"]);
+  assert.deepEqual(buildPromptHistory(messages), [" first prompt ", "second prompt"]);
 });
 
 test("formatTokenCount uses binary K/M units with at most one decimal", () => {

@@ -15,7 +15,7 @@ import {
   getPromptReturnKeyAction,
   isPromptCursorAtWrapBoundary,
   isClearImageAttachmentsShortcut,
-  isRawModeShortcut,
+  isHistorySearchShortcut,
   removeCurrentSlashToken,
   resolvePromptTerminalCursorPosition,
   toggleSkillSelection,
@@ -301,11 +301,11 @@ test("parseTerminalInput recognizes ctrl+x as the image attachment clear shortcu
   assert.equal(isClearImageAttachmentsShortcut(input, key), true);
 });
 
-test("parseTerminalInput recognizes ctrl+r as the raw mode shortcut", () => {
+test("parseTerminalInput recognizes ctrl+r as the history search shortcut", () => {
   const { input, key } = parseTerminalInput("\u0012");
   assert.equal(input, "r");
   assert.equal(key.ctrl, true);
-  assert.equal(isRawModeShortcut(input, key), true);
+  assert.equal(isHistorySearchShortcut(input, key), true);
 });
 
 test("parseTerminalInput recognizes ctrl+- modifyOtherKeys sequence (standard)", () => {
@@ -476,5 +476,17 @@ test("resolvePromptTerminalCursorPosition clamps negative terminal cells", () =>
       top: -1,
     }),
     { x: 0, y: 0 }
+  );
+});
+
+test("dispatchTerminalInput preserves text coalesced after history search shortcuts", () => {
+  const events = collectDispatchedInput("\x12needle\x13");
+  assert.deepEqual(
+    events.map(({ input, key }) => [input, key.ctrl]),
+    [
+      ["r", true],
+      ["needle", false],
+      ["s", true],
+    ]
   );
 });

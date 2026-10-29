@@ -1194,6 +1194,7 @@ function App({
         <PlanImplementationPrompt onSelect={handlePlanImplementationChoice} />
       ) : isExiting ? null : (
         <PromptInput
+          key={sessionManager.getActiveSessionId() ?? "new"}
           projectRoot={projectRoot}
           screenWidth={screenWidth}
           skills={skills}

@@ -1,3 +1,4 @@
+import { appendHistoryEntry, type ResolvedHistorySettings } from "./common/message-history";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -326,6 +327,7 @@ export type MessageMeta = {
   asThinking?: boolean;
   isAnswers?: boolean;
   isSummary?: boolean;
+  isToolFollowUp?: boolean;
   omittedImages?: string[];
   isModelChange?: boolean;
   skill?: SkillInfo;
@@ -397,6 +399,7 @@ export type SessionManagerOptions = {
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
+    history?: ResolvedHistorySettings;
   };
   renderMarkdown: (text: string) => string;
   onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
@@ -448,6 +451,7 @@ export class SessionManager {
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
+    history?: ResolvedHistorySettings;
   };
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
@@ -1604,6 +1608,7 @@ ${agentInstructions}
     this.recordUserPromptCheckpoint(sessionId);
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
+    await this.persistUserHistory(userMessage);
     this.maybeGenerateSessionTitle(sessionId, userPrompt);
 
     let matchedSkills: SkillInfo[] = [];
@@ -1684,6 +1689,7 @@ ${agentInstructions}
     }
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
+    await this.persistUserHistory(userMessage);
     this.maybeGenerateSessionTitle(sessionId, userPrompt);
 
     let matchedSkills: SkillInfo[] = [];
@@ -2983,6 +2989,21 @@ ${agentInstructions}
     }
   }
 
+  private async persistUserHistory(message: SessionMessage): Promise<void> {
+    try {
+      await appendHistoryEntry(
+        {
+          session_id: message.sessionId,
+          ts: Math.floor(Date.parse(message.createTime) / 1000),
+          text: message.content ?? "",
+        },
+        this.getResolvedSettings().history
+      );
+    } catch {
+      this.addSessionSystemMessage(message.sessionId, "Could not save prompt history.", true);
+    }
+  }
+
   private appendSessionMessage(sessionId: string, message: SessionMessage): void {
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
@@ -3251,6 +3272,7 @@ ${agentInstructions}
       messageParams: null,
       compacted: false,
       visible: message.visible ?? false,
+      meta: { isToolFollowUp: true },
       createTime: now,
       updateTime: now,
     };
@@ -3501,6 +3523,7 @@ ${agentInstructions}
     const signal = controller.signal;
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
+    await this.persistUserHistory(userMessage);
     let matchedSkills: SkillInfo[] = [];
     if (userPrompt.text) {
       const skills = await this.listSkills(sessionId);

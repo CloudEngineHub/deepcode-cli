@@ -48,6 +48,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `temperature`              | number        | Sampling temperature for LLM, from `0` to `2`                                                                        |
 | `permissions`              | object        | Permission policy and additional `addWorkingDirs` workspace roots (see [permission_en.md](./permission_en.md))       |
 | `enabledSkills`            | object        | Per-skill enable/disable map, keyed by skill name                                                                    |
+| `history`                  | object        | Persistence and size limit for user input history |
 
 #### `env` Sub-fields
 
@@ -274,6 +275,26 @@ Applied in the following priority order (lower-numbered overridden by higher-num
 3. Project-level settings.json: `{"mcpServers":{"github":{"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"..."}}}}`
 4. Project-level settings.json: `{"env": {"MCP_GITHUB_PERSONAL_ACCESS_TOKEN": "..."}}`
 5. System environment variable: `DEEPCODE_MCP_GITHUB_PERSONAL_ACCESS_TOKEN=... deepcode`
+
+#### Input history and search
+
+Press Ctrl+R to search user input from the current session and saved history. Type to preview matches; Ctrl+R / ↑ finds older matches, and Ctrl+S / ↓ finds newer matches. Enter places the result in the input for editing without sending it. Esc / Ctrl+C cancels and restores the original draft. Use `/raw` to select the raw display mode.
+
+History contains submitted user text only, excluding generated summaries, tool-injected content, and messages from other roles. Cross-session history is stored at `~/.deepcode/history.jsonl`. Configure it in `settings.json`:
+
+```json
+{
+  "history": {
+    "persistence": "saveAll",
+    "maxBytes": 10485760
+  }
+}
+```
+
+- `persistence` defaults to `"saveAll"`. Set it to `"none"` to stop saving without deleting, clearing, or trimming existing history. Existing history remains searchable.
+- `maxBytes` defaults to `10485760` (10 MiB) and must be a non-negative integer. `0` means unlimited size; history is still saved.
+- The size is checked after every append. When it exceeds the limit, the oldest records are removed to retain about 80% of the limit. The newest record is always kept, even if that record alone exceeds the limit.
+- Project settings override user settings per field. Existing sessions are not automatically copied into global history; resuming a session makes its user input searchable.
 
 ## DeepCode PLUS subscription and LLM routing
 
