@@ -164,6 +164,7 @@ export function inspectSettings(options: {
       "telemetryEnabled",
       "notify",
       "webSearchTool",
+      "deepseekSearchApiEnabled",
       "multimodal",
       "filesApiEnabled",
       "filesApiTimeoutMs",

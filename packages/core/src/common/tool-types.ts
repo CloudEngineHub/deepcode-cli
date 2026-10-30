@@ -19,6 +19,7 @@ export type OpenAIClientResult = {
   telemetryEnabled?: boolean;
   notify?: string;
   webSearchTool?: string;
+  deepseekSearchApiEnabled?: boolean;
   env?: Record<string, string>;
   machineId?: string;
   plusApiKey?: string;

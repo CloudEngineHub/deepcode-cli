@@ -44,6 +44,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `telemetryEnabled`         | boolean       | Enable anonymous usage reporting (default `true`)                                                                    |
 | `notify`                   | string        | Full path to a task-completion notification script (e.g., Slack notification script)                                 |
 | `webSearchTool`            | string        | Full path to a custom web search script                                                                              |
+| `deepseekSearchApiEnabled` | boolean | Use DeepSeek official web search (default `false`) |
 | `mcpServers`               | object        | MCP server configurations (keys are service names, values are McpServerConfig objects)                               |
 | `temperature`              | number        | Sampling temperature for LLM, from `0` to `2`                                                                        |
 | `permissions`              | object        | Permission policy and additional `addWorkingDirs` workspace roots (see [permission_en.md](./permission_en.md))       |
@@ -149,6 +150,12 @@ The following context is injected as environment variables when the notify scrip
 ```
 
 > For detailed configuration examples (Slack, Feishu, terminal notifications, system notifications, etc.), see [notify_en.md](notify_en.md).
+
+#### `deepseekSearchApiEnabled` — DeepSeek Web Search
+
+Set `deepseekSearchApiEnabled: true` to use [DeepSeek official web search](https://api-docs.deepseek.com/guides/search) when the active connection's `BASE_URL` is exactly `https://api.deepseek.com`. It uses the connection's API key and takes priority over `webSearchTool`. Queries are sent directly without translation and must not exceed 128 Unicode characters. Failed searches return an error without falling back to another search service.
+
+The default is `false`. When disabled or using another API address, the existing search behavior applies.
 
 #### `webSearchTool` — Custom Web Search
 

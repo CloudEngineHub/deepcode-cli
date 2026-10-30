@@ -34,6 +34,7 @@ function createSettings(
     reasoningEffort: "high",
     debugLogEnabled: false,
     telemetryEnabled: false,
+    deepseekSearchApiEnabled: false,
     multimodal: "default",
     filesApiEnabled: false,
     filesApiTimeoutMs: 60_000,

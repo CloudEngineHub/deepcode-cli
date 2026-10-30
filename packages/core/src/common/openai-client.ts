@@ -53,6 +53,7 @@ export function createOpenAIClient(
   telemetryEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
+  deepseekSearchApiEnabled?: boolean;
   env: Record<string, string>;
   machineId?: string;
   plusApiKey?: string;
@@ -77,6 +78,7 @@ export function createOpenAIClient(
       telemetryEnabled: settings.telemetryEnabled,
       notify: settings.notify,
       webSearchTool: settings.webSearchTool,
+      deepseekSearchApiEnabled: settings.deepseekSearchApiEnabled,
       env: settings.env,
       machineId: getMachineId(),
       plusApiKey,
@@ -99,6 +101,7 @@ export function createOpenAIClient(
       telemetryEnabled: settings.telemetryEnabled,
       notify: settings.notify,
       webSearchTool: settings.webSearchTool,
+      deepseekSearchApiEnabled: settings.deepseekSearchApiEnabled,
       env: settings.env,
       machineId: getMachineId(),
       plusApiKey,
@@ -140,6 +143,7 @@ export function createOpenAIClient(
     telemetryEnabled: settings.telemetryEnabled,
     notify: settings.notify,
     webSearchTool: settings.webSearchTool,
+    deepseekSearchApiEnabled: settings.deepseekSearchApiEnabled,
     env: settings.env,
     machineId: getMachineId(),
     plusApiKey,

@@ -103,6 +103,7 @@ export type DeepcodingSettings = {
   telemetryEnabled?: boolean;
   notify?: string;
   webSearchTool?: string;
+  deepseekSearchApiEnabled?: boolean;
   multimodal?: MultimodalMode;
   filesApiEnabled?: boolean;
   filesApiTimeoutMs?: number;
@@ -133,6 +134,7 @@ export type ResolvedDeepcodingSettings = {
   telemetryEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
+  deepseekSearchApiEnabled: boolean;
   multimodal: MultimodalMode;
   filesApiEnabled: boolean;
   filesApiTimeoutMs: number;
@@ -862,6 +864,15 @@ export function resolveSettingsSources(
     ""
   );
 
+  const deepseekSearchApiEnabled = choose(
+    "deepseekSearchApiEnabled",
+    [
+      ["project.deepseekSearchApiEnabled", parseBoolean(projectSettings?.deepseekSearchApiEnabled)],
+      ["user.deepseekSearchApiEnabled", parseBoolean(userSettings?.deepseekSearchApiEnabled)],
+    ],
+    false
+  );
+
   const multimodal = choose(
     "multimodal",
     [
@@ -995,6 +1006,7 @@ export function resolveSettingsSources(
     telemetryEnabled,
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
+    deepseekSearchApiEnabled,
     multimodal,
     filesApiEnabled,
     filesApiTimeoutMs,
