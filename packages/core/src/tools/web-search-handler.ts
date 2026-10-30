@@ -54,7 +54,7 @@ export async function handleWebSearchTool(
 
   const llmContext = context.createOpenAIClient?.();
   if (llmContext?.deepseekSearchApiEnabled === true && llmContext.baseURL === DEFAULT_BASE_URL) {
-    return executeDeepSeekWebSearch(query, llmContext.apiKey, context, formatWebSearchActivityLabel(query));
+    return executeDeepSeekWebSearch(query, llmContext, context, formatWebSearchActivityLabel(query));
   }
   const scriptPath = llmContext?.webSearchTool?.trim();
   if (scriptPath) {

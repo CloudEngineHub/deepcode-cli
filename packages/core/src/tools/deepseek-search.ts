@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_BASE_URL } from "../settings";
+import { logOpenAIChatCompletionDebug } from "../common/debug-logger";
+import type { OpenAIClientResult } from "../common/tool-types";
 import type { ToolExecutionContext, ToolExecutionResult } from "./executor";
 
 const MAX_OUTPUT_CHARS = 30000;
@@ -34,12 +36,14 @@ function formatResults(payload: unknown): string {
 
 export async function executeDeepSeekWebSearch(
   query: string,
-  apiKey: string | undefined,
+  { apiKey, debugLogEnabled }: Pick<OpenAIClientResult, "apiKey" | "debugLogEnabled">,
   context: ToolExecutionContext,
   activityLabel: string
 ): Promise<ToolExecutionResult> {
   context.signal?.throwIfAborted();
   let activityId: string | undefined;
+  let startedAt: number | undefined;
+  let httpStatus: number | undefined;
   try {
     if (Array.from(query).length > 128) {
       throw new Error("DeepSeek search query must not exceed 128 Unicode characters.");
@@ -50,6 +54,7 @@ export async function executeDeepSeekWebSearch(
     activityId = `web-search-${randomUUID()}`;
     context.onProcessStart?.(activityId, activityLabel);
     context.signal?.throwIfAborted();
+    startedAt = Date.now();
     const response = await fetch(`${DEFAULT_BASE_URL}/v1/tools/search`, {
       method: "POST",
       redirect: "error",
@@ -60,6 +65,7 @@ export async function executeDeepSeekWebSearch(
       },
       body: JSON.stringify({ query, count: 10, need_content: false }),
     });
+    httpStatus = response.status;
     context.signal?.throwIfAborted();
     if (!response.ok) {
       let detail = "";
@@ -96,6 +102,17 @@ export async function executeDeepSeekWebSearch(
       error: `WebSearch DeepSeek search failed: ${error instanceof Error ? error.message : String(error)}`,
     };
   } finally {
+    if (debugLogEnabled && startedAt !== undefined) {
+      logOpenAIChatCompletionDebug({
+        timestamp: new Date(startedAt).toISOString(),
+        location: "WebSearch.deepseekSearchApi",
+        requestId: activityId,
+        sessionId: context.sessionId,
+        durationMs: Date.now() - startedAt,
+        request: { url: `${DEFAULT_BASE_URL}/v1/tools/search`, method: "POST", query },
+        response: { status: httpStatus ?? null },
+      });
+    }
     if (activityId !== undefined) context.onProcessExit?.(activityId);
   }
 }

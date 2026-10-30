@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import type OpenAI from "openai";
 import type { ToolExecutionContext } from "../tools/executor";
 import { handleWebSearchTool } from "../tools/web-search-handler";
@@ -22,6 +24,7 @@ function setup(t: TestContext) {
     client: { chat: { completions: { create: chat } } } as unknown as OpenAI,
     model: "test",
     thinkingEnabled: true,
+    debugLogEnabled: false,
     apiKey: "sk-test",
     baseURL: "https://api.deepseek.com",
     deepseekSearchApiEnabled: true as boolean | undefined,
@@ -229,3 +232,48 @@ test("official search cleans up activity after network failure", async (t) => {
   assert.match(result.error ?? "", /fetch failed/);
   assert.deepEqual(f.exits, f.starts);
 });
+
+for (const [enabled, status] of [
+  [true, 200],
+  [true, 429],
+  [true, null],
+  [false, 200],
+] as const) {
+  test(`official search HTTP logging: enabled=${enabled}, status=${status}`, async (t) => {
+    const f = setup(t);
+    f.client.debugLogEnabled = enabled;
+    const logs: string[] = [];
+    const mkdir = t.mock.method(fs, "mkdirSync", () => undefined);
+    const append = t.mock.method(fs, "appendFileSync", (_file: unknown, data: unknown) => {
+      logs.push(String(data));
+    });
+    syncBuiltinESMExports();
+    t.after(() => {
+      mkdir.mock.restore();
+      append.mock.restore();
+      syncBuiltinESMExports();
+    });
+    t.mock.method(globalThis, "fetch", async () => {
+      if (status === null) throw new TypeError("fetch failed");
+      return Response.json({ results: [source] }, { status });
+    });
+    const result = await handleWebSearchTool({ query: "重庆天气" }, f.context);
+    assert.equal(result.ok, status === 200);
+    assert.equal(logs.length, enabled ? 1 : 0);
+    if (enabled) {
+      const entry = JSON.parse(logs[0]);
+      assert.equal(entry.location, "WebSearch.deepseekSearchApi");
+      assert.equal(entry.sessionId, f.context.sessionId);
+      assert.equal(entry.requestId, f.starts[0]);
+      assert.ok(Number.isFinite(Date.parse(entry.timestamp)));
+      assert.ok(entry.durationMs >= 0);
+      assert.deepEqual(entry.request, {
+        url: "https://api.deepseek.com/v1/tools/search",
+        method: "POST",
+        query: "重庆天气",
+      });
+      assert.deepEqual(entry.response, { status });
+      assert.ok(!logs[0].includes(f.client.apiKey));
+    }
+  });
+}
