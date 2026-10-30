@@ -1,3 +1,4 @@
+import { getCompletedProposedPlan } from "@vegamo/deepcode-core/common/plan-implementation";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
@@ -24,7 +25,6 @@ import {
 import { PermissionPrompt, type PermissionPromptResult } from "./PermissionPrompt";
 import {
   PlanImplementationPrompt,
-  extractProposedPlan,
   getClearContextImplementationPrompt,
   getImplementationPrompt,
   type PlanImplementationChoice,
@@ -525,10 +525,11 @@ function App({
         await refreshSkills();
         refreshSessionsList();
         const completedSession = sessionManager.getSession(sessionManager.getActiveSessionId() ?? "");
-        const proposedPlan =
-          prompt.planMode && completedSession?.status === "completed"
-            ? extractProposedPlan(completedSession.assistantReply)
-            : null;
+        const proposedPlan = getCompletedProposedPlan(
+          prompt.planMode === true,
+          completedSession?.status,
+          completedSession?.assistantReply ?? null
+        );
         setPendingPlanImplementation(proposedPlan);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

@@ -105,6 +105,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
           type: "sessionStatus",
           sessionId: entry.id,
           status: entry.status,
+          planMode: entry.planMode === true,
           pluginRateLimitedTool: entry.pluginRateLimitedTool ?? null,
           askPermissions: entry.askPermissions,
           processes: this.serializeProcesses(entry.processes),
@@ -590,6 +591,8 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.context.extensionUri, "resources", "thinking-preview.js")
     );
 
+    const composerJsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "out", "composer.js"));
+
     // 获取 Logo 文件 URI
     const iconPath = vscode.Uri.joinPath(this.context.extensionUri, "resources", "deepcoding_icon.png");
     const iconUri = webview.asWebviewUri(iconPath);
@@ -600,6 +603,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     html = html.replace(/\{\{cssUri\}\}/g, cssUri.toString());
     html = html.replace(/\{\{attachmentsJsUri\}\}/g, attachmentsJsUri.toString());
     html = html.replace(/\{\{thinkingPreviewJsUri\}\}/g, thinkingPreviewJsUri.toString());
+    html = html.replace(/\{\{composerJsUri\}\}/g, composerJsUri.toString());
     html = html.replace(/\{\{iconUri\}\}/g, iconUri.toString());
     html = html.replace(/\{\{workspaceRoot\}\}/g, () =>
       JSON.stringify(this.getWorkspaceRoot()).replace(/</g, "\\u003c")

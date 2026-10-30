@@ -35,6 +35,14 @@
       "types": "./dist/common/npm-registry.d.ts",
       "import": "./dist/common/npm-registry.js"
     },
+    "./common/plan-implementation": {
+      "types": "./dist/common/plan-implementation.d.ts",
+      "import": "./dist/common/plan-implementation.js"
+    },
+    "./common/slash-commands": {
+      "types": "./dist/common/slash-commands.d.ts",
+      "import": "./dist/common/slash-commands.js"
+    },
     "./common/session-id": {
       "types": "./dist/common/session-id.d.ts",
       "import": "./dist/common/session-id.js"
