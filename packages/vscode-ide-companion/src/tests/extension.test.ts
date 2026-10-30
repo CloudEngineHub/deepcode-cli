@@ -36,6 +36,12 @@ function createMockSessionManager(options?: { sessions?: any[]; messages?: any[]
     denySessionPermission: (_sessionId: string) => {},
     listSkills: () => Promise.resolve(skills),
     initMcpServers: () => Promise.resolve(),
+    forkSession: (id: string) => {
+      const source = sessions.find((s: any) => s.id === id);
+      sessions.push({ ...source, id: "forked-session" });
+      return "forked-session";
+    },
+    compactSession: () => Promise.resolve(true),
   };
 }
 
@@ -258,7 +264,7 @@ test("userPrompt with text sends userMessage and loading states", async () => {
 
   // Should end with loading: false
   const lastLoading = [...deps.messages].reverse().find((m: any) => m.type === "loading");
-  assert.deepEqual(lastLoading, { type: "loading", value: false });
+  assert.deepEqual(lastLoading, { type: "loading", value: false, status: "idle" });
 });
 
 test("userPrompt with images sends userMessage with image placeholder", async () => {
@@ -366,7 +372,7 @@ test("userPrompt always sends loading: false even on error", async () => {
   await handleWebviewMessage({ type: "userPrompt", prompt: "hello" }, deps);
 
   const lastLoading = [...deps.messages].reverse().find((m: any) => m.type === "loading");
-  assert.deepEqual(lastLoading, { type: "loading", value: false });
+  assert.deepEqual(lastLoading, { type: "loading", value: false, status: "idle" });
 });
 
 // --- loadSession ---
@@ -539,4 +545,265 @@ test("loadSession prepares legacy tool diffs without modifying persisted content
   assert.equal(metadata.diff_details.removed, 1);
   assert.equal(metadata.diff_details.lines[0].lineNumber, 1);
   assert.equal(original.content, content);
+});
+
+test("plan mode is passed to prompts and restored with session state", async () => {
+  const deps = createDeps();
+  const submitted: any[] = [];
+  deps.sessionManager.handleUserPrompt = async (prompt) => {
+    submitted.push(prompt);
+  };
+  const session = deps.sessionManager.getSession("session-1")!;
+  session.planMode = true;
+  await handleWebviewMessage({ type: "userPrompt", prompt: "Plan it", planMode: true }, deps);
+  await handleWebviewMessage({ type: "userPrompt", prompt: "Implement it", planMode: false }, deps);
+  assert.equal(submitted[0].planMode, true);
+  assert.equal(submitted[1].planMode, false);
+  loadSession("session-1", deps.sessionManager, deps.postMessage, deps.renderMarkdown);
+  assert.equal((deps.messages.find((m: any) => m.type === "loadSession") as any).planMode, true);
+  assert.equal((deps.messages.find((m: any) => m.type === "sessionStatus") as any).planMode, true);
+});
+
+test("slash commands reuse session navigation and do not submit local commands as prompts", async () => {
+  const deps = createDeps();
+  deps.sessionManager.handleUserPrompt = async () => {
+    assert.fail("Unexpected prompt");
+  };
+  await handleWebviewMessage({ type: "slashCommand", command: "resume" }, deps);
+  assert.ok(deps.messages.some((m: any) => m.type === "openSessionPicker"));
+  await handleWebviewMessage({ type: "slashCommand", command: "fork" }, deps);
+  assert.equal(deps.sessionManager.getActiveSessionId(), "forked-session");
+  await handleWebviewMessage({ type: "slashCommand", command: "new" }, deps);
+  assert.equal(deps.sessionManager.getActiveSessionId(), null);
+  assert.ok(deps.messages.some((m: any) => m.type === "initializeEmpty" && m.fresh === true));
+  deps.messages.length = 0;
+  await handleWebviewMessage({ type: "slashCommand", command: "continue" }, deps);
+  assert.ok(deps.messages.some((m: any) => m.type === "openSessionPicker"));
+  await handleWebviewMessage({ type: "slashCommand", command: "exit" }, deps);
+});
+
+test("init and continue submit through the normal prompt pipeline with plan mode and permissions", async () => {
+  const deps = createDeps();
+  const submitted: any[] = [];
+  deps.sessionManager.handleUserPrompt = async (prompt) => {
+    submitted.push(prompt);
+  };
+  await handleWebviewMessage(
+    { type: "slashCommand", command: "init", skills: [{ name: "test" }], planMode: true },
+    deps
+  );
+  await handleWebviewMessage(
+    {
+      type: "slashCommand",
+      command: "continue",
+      planMode: true,
+      permissions: [{ toolCallId: "call-1", permission: "allow" }],
+    },
+    deps
+  );
+  assert.equal(submitted[0].text, "/init");
+  assert.deepEqual(submitted[0].skills, [{ name: "test" }]);
+  assert.equal(submitted[0].planMode, true);
+  assert.equal(submitted[1].text, "/continue");
+  assert.equal(submitted[1].planMode, true);
+  assert.deepEqual(submitted[1].permissions, [{ toolCallId: "call-1", permission: "allow" }]);
+});
+
+test("compaction blocks duplicate operations and can be interrupted", async () => {
+  const deps = createDeps();
+  let calls = 0;
+  let signal: AbortSignal | undefined;
+  deps.sessionManager.compactSession = async (_sessionId, abortSignal) => {
+    calls++;
+    signal = abortSignal;
+    return new Promise<boolean>((_resolve, reject) => {
+      abortSignal!.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
+    });
+  };
+  const pending = handleWebviewMessage({ type: "slashCommand", command: "compact" }, deps);
+  await handleWebviewMessage({ type: "slashCommand", command: "compact" }, deps);
+  await handleWebviewMessage({ type: "createNewSession" }, deps);
+  assert.equal(calls, 1);
+  assert.equal(deps.sessionManager.getActiveSessionId(), "session-1");
+  await handleWebviewMessage({ type: "interrupt" }, deps);
+  await pending;
+  assert.equal(signal?.aborted, true);
+  assert.ok(deps.messages.some((m: any) => m.type === "commandNotice" && m.text === "Compaction cancelled."));
+  assert.ok(deps.messages.some((m: any) => m.type === "commandBusy" && m.value === false));
+  await handleWebviewMessage({ type: "createNewSession" }, deps);
+  assert.equal(deps.sessionManager.getActiveSessionId(), null);
+});
+
+test("compaction reports no-op and failure, and always releases busy state", async () => {
+  const deps = createDeps();
+  deps.sessionManager.compactSession = async () => false;
+  await handleWebviewMessage({ type: "slashCommand", command: "compact" }, deps);
+  assert.ok(deps.messages.some((m: any) => m.text === "Conversation was not compacted."));
+  deps.sessionManager.compactSession = async () => {
+    throw new Error("API failed");
+  };
+  await handleWebviewMessage({ type: "slashCommand", command: "compact" }, deps);
+  assert.ok(deps.messages.some((m: any) => m.text === "Compaction failed: API failed"));
+  assert.equal(deps.messages.filter((m: any) => m.type === "commandBusy" && m.value === false).length, 2);
+});
+
+test("ready restores the selected session or an unsent new conversation", async () => {
+  const deps = createDeps();
+  await handleWebviewMessage({ type: "slashCommand", command: "fork" }, deps);
+  await handleWebviewMessage({ type: "ready", sessionId: "forked-session" }, deps);
+  assert.equal(deps.sessionManager.getActiveSessionId(), "forked-session");
+  await handleWebviewMessage({ type: "ready", sessionId: null }, deps);
+  assert.equal(deps.sessionManager.getActiveSessionId(), null);
+  assert.ok(deps.messages.some((m: any) => m.type === "initializeEmpty" && m.fresh === false));
+});
+
+test("webview reconstruction cannot switch away from a running session", async () => {
+  const deps = createDeps();
+  const session = deps.sessionManager.getSession("session-1")!;
+  session.status = "processing";
+  session.planMode = true;
+  await handleWebviewMessage({ type: "ready", sessionId: null }, deps);
+  assert.equal(deps.sessionManager.getActiveSessionId(), "session-1");
+  const loaded = deps.messages.find((m: any) => m.type === "loadSession") as any;
+  assert.equal(loaded.planMode, true);
+});
+
+test("compaction and fork without a session report a notice without submitting a prompt", async () => {
+  const deps = createDeps({ sessions: [] });
+  deps.sessionManager.handleUserPrompt = async () => assert.fail("Unexpected prompt");
+  await handleWebviewMessage({ type: "slashCommand", command: "compact" }, deps);
+  await handleWebviewMessage({ type: "slashCommand", command: "fork" }, deps);
+  assert.deepEqual(deps.messages, [
+    { type: "commandNotice", text: "No active conversation to compact." },
+    { type: "commandNotice", text: "No active conversation to fork." },
+  ]);
+});
+
+async function completePlan(
+  deps: ReturnType<typeof createDeps>,
+  reply = "<proposed_plan>\n# Plan\n- Implement it\n</proposed_plan>"
+) {
+  deps.sessionManager.handleUserPrompt = async () => {
+    const session = deps.sessionManager.getSession(deps.sessionManager.getActiveSessionId()!)!;
+    session.status = "completed";
+    session.planMode = true;
+    session.assistantReply = reply;
+  };
+  await handleWebviewMessage({ type: "userPrompt", prompt: "Make a plan", planMode: true }, deps);
+  const offered = deps.messages.find((m: any) => m.type === "planImplementation") as any;
+  assert.ok(offered);
+  return { id: offered.id, sessionId: offered.sessionId };
+}
+
+test("only the current completed plan response offers implementation choices", async () => {
+  for (const [planMode, status, reply, expected] of [
+    [true, "completed", "<proposed_plan>Plan</proposed_plan>", true],
+    [false, "completed", "<proposed_plan>Plan</proposed_plan>", false],
+    [true, "interrupted", "<proposed_plan>Plan</proposed_plan>", false],
+    [true, "waiting_for_user", "<proposed_plan>Plan</proposed_plan>", false],
+    [true, "completed", "<proposed_plan>Partial", false],
+    [true, "completed", "<proposed_plan> </proposed_plan>", false],
+  ] as const) {
+    const deps = createDeps();
+    deps.sessionManager.handleUserPrompt = async () => {
+      Object.assign(deps.sessionManager.getSession("session-1")!, { status, assistantReply: reply, planMode });
+    };
+    await handleWebviewMessage({ type: "userPrompt", prompt: "Make a plan", planMode }, deps);
+    assert.equal(
+      deps.messages.some((m: any) => m.type === "planImplementation"),
+      expected
+    );
+  }
+  const deps = createDeps();
+  Object.assign(deps.sessionManager.getSession("session-1")!, {
+    status: "completed",
+    planMode: true,
+    assistantReply: "<proposed_plan>Historical plan</proposed_plan>",
+  });
+  await handleWebviewMessage({ type: "ready" }, deps);
+  assert.equal(
+    deps.messages.some((m: any) => m.type === "planImplementation"),
+    false
+  );
+});
+
+test("implement keeps the conversation, exits Plan mode, and cannot run twice", async () => {
+  const deps = createDeps();
+  const pending = await completePlan(deps);
+  const prompts: any[] = [];
+  deps.sessionManager.handleUserPrompt = async (prompt) => {
+    prompts.push(prompt);
+  };
+  await handleWebviewMessage({ type: "planImplementationChoice", ...pending, choice: "implement" }, deps);
+  assert.equal(deps.sessionManager.getActiveSessionId(), "session-1");
+  assert.equal(prompts[0].text, "Implement the plan.");
+  assert.equal(prompts[0].planMode, false);
+  await handleWebviewMessage({ type: "planImplementationChoice", ...pending, choice: "implement" }, deps);
+  assert.equal(prompts.length, 1);
+});
+
+test("clear context implements the complete plan in a new conversation and preserves the original", async () => {
+  const deps = createDeps();
+  const plan = "# Plan\n\n- Keep `Markdown`\n- Verify tests";
+  const pending = await completePlan(deps, `<proposed_plan>${plan}</proposed_plan>`);
+  let prompt: any;
+  deps.sessionManager.handleUserPrompt = async (submitted) => {
+    assert.equal(deps.sessionManager.getActiveSessionId(), null);
+    prompt = submitted;
+    deps.sessionManager
+      .listSessions()
+      .push({ ...deps.sessionManager.getSession("session-1")!, id: "new-session", planMode: false });
+    deps.sessionManager.setActiveSessionId("new-session");
+  };
+  await handleWebviewMessage({ type: "planImplementationChoice", ...pending, choice: "clear-context" }, deps);
+  assert.equal(prompt.planMode, false);
+  assert.ok(prompt.text.endsWith(`\n\n${plan}`));
+  assert.match(prompt.text, /Implement the plan in a fresh context/);
+  assert.equal(deps.sessionManager.getActiveSessionId(), "new-session");
+  assert.ok(deps.sessionManager.getSession("session-1"));
+  assert.ok(deps.messages.some((m: any) => m.type === "initializeEmpty" && m.fresh));
+});
+
+test("stay and default only dismiss the chooser; plain replies continue in Plan mode", async () => {
+  for (const choice of ["stay", "default"] as const) {
+    const deps = createDeps();
+    const pending = await completePlan(deps);
+    const prompts: any[] = [];
+    deps.sessionManager.handleUserPrompt = async (prompt) => {
+      prompts.push(prompt);
+    };
+    await handleWebviewMessage({ type: "planImplementationChoice", ...pending, choice }, deps);
+    assert.equal(prompts.length, 0);
+    await handleWebviewMessage({ type: "userPrompt", prompt: "Follow up", planMode: choice === "stay" }, deps);
+    assert.equal(prompts[0].planMode, choice === "stay");
+  }
+  const deps = createDeps();
+  const pending = await completePlan(deps);
+  const prompts: any[] = [];
+  deps.sessionManager.handleUserPrompt = async (prompt) => {
+    prompts.push(prompt);
+  };
+  await handleWebviewMessage({ type: "userPrompt", prompt: "Revise step two", planMode: false }, deps);
+  assert.equal(prompts[0].text, "Revise step two");
+  assert.equal(prompts[0].planMode, true);
+  await handleWebviewMessage({ type: "planImplementationChoice", ...pending, choice: "implement" }, deps);
+  assert.equal(prompts.length, 1);
+});
+
+test("pending choices survive Webview reconstruction but not switching sessions", async () => {
+  const deps = createDeps();
+  const pending = await completePlan(deps);
+  deps.messages.length = 0;
+  await handleWebviewMessage({ type: "ready", sessionId: "session-1" }, deps);
+  assert.ok(deps.messages.some((m: any) => m.type === "planImplementation" && m.id === pending.id));
+  await handleWebviewMessage({ type: "createNewSession" }, deps);
+  deps.sessionManager.handleUserPrompt = async () => assert.fail("Stale plan must not execute");
+  await handleWebviewMessage({ type: "planImplementationChoice", ...pending, choice: "implement" }, deps);
+  await handleWebviewMessage({ type: "selectSession", sessionId: "session-1" }, deps);
+  deps.messages.length = 0;
+  await handleWebviewMessage({ type: "ready", sessionId: "session-1" }, deps);
+  assert.equal(
+    deps.messages.some((m: any) => m.type === "planImplementation"),
+    false
+  );
 });

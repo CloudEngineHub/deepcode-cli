@@ -913,6 +913,27 @@ body {
   margin-bottom: 10px;
 }
 
+.plan-implementation-menu {
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--vscode-input-background);
+}
+
+.plan-implementation-choice {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-family: inherit;
+  text-align: left;
+}
+
+.plan-implementation-choice:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  background: var(--vscode-list-hoverBackground);
+}
+
 .permission-card {
   border: 1px solid var(--vscode-panel-border);
   border-left: 3px solid var(--vscode-notificationsWarningIcon-foreground, #f59e0b);
@@ -1587,6 +1608,52 @@ textarea::placeholder {
   align-items: center;
   gap: 8px;
   width: calc(100% - 60px);
+}
+
+.plan-mode-tag {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  padding: 3px 8px 3px 5px;
+  border-radius: 14px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.plan-mode-tag[hidden] {
+  display: none;
+}
+
+.plan-mode-tag button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.plan-mode-tag button:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.plan-mode-tag button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.command-notice {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
 }
 
 /* Skills Tags */

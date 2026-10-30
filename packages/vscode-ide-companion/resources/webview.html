@@ -61,6 +61,15 @@
             <div class="skills-popup-header">Select Skills</div>
             <div class="skills-popup-list" id="skillsPopupList"></div>
           </div>
+          <div class="skills-popup" id="slashPopup">
+            <div class="skills-popup-header">Commands</div>
+            <div class="skills-popup-list" id="slashPopupList" role="listbox" aria-label="Commands"></div>
+          </div>
+          <div class="command-notice" id="commandNotice" role="status" hidden></div>
+          <div class="plan-implementation-menu" id="planImplementationMenu" role="menu" aria-labelledby="planImplementationTitle" hidden>
+            <div class="skills-popup-header" id="planImplementationTitle">Plan ready</div>
+            <div class="skills-popup-list" id="planImplementationChoices"></div>
+          </div>
           <div class="permission-prompt-host" id="permissionPromptHost" hidden></div>
           <div class="input-wrap">
             <div class="tools-line"></div>
@@ -78,6 +87,10 @@
                 <div class="context-meter" id="contextMeter" aria-label="Context usage">
                   <div class="context-meter-ring" id="contextMeterRing"></div>
                   <div class="context-meter-tooltip" id="contextMeterTooltip" role="tooltip"></div>
+                </div>
+                <div class="plan-mode-tag" id="planModeTag" hidden>
+                  <button type="button" id="cancelPlanMode" title="Exit Plan mode" aria-label="Exit Plan mode">&times;</button>
+                  <span>Plan mode</span>
                 </div>
                 <div class="skills-tags" id="skillsTags"></div>
               </div>
@@ -99,10 +112,16 @@
       </div>
     </div>
 
+    <script nonce="{{nonce}}" src="{{composerJsUri}}"></script>
     <script nonce="{{nonce}}" src="{{attachmentsJsUri}}"></script>
     <script nonce="{{nonce}}" src="{{thinkingPreviewJsUri}}"></script>
     <script nonce="{{nonce}}">
       const vscode = acquireVsCodeApi();
+      const savedState = vscode.getState() || {};
+      const composerState = new DeepcodeComposer.ComposerState(savedState.drafts);
+      composerState.sessionId = savedState.sessionId || null;
+      const savedDraft = savedState.drafts?.[composerState.sessionId || "new"];
+      composerState.planMode = savedDraft?.planMode === true;
       const workspaceRoot = {{workspaceRoot}};
       const userHome = {{userHome}};
       const app = document.querySelector(".app");
@@ -159,6 +178,9 @@
       }
 
       let currentSessionId = null;
+      let commandBusy = false;
+      let planImplementationRunning = false;
+      let hasLoadedSession = false;
       let currentSessionStatus = null;
       let allSessions = [];
       let sessionSearchInput = null;
@@ -182,8 +204,167 @@
       }
 
       function isProcessing() {
-        return isBusyStatus(currentSessionStatus);
+        return commandBusy || planImplementationRunning || isBusyStatus(currentSessionStatus);
       }
+
+      const planImplementationMenu = document.getElementById("planImplementationMenu");
+      const planImplementationChoices = document.getElementById("planImplementationChoices");
+      DeepcodeComposer.PLAN_IMPLEMENTATION_CHOICES.forEach((choice, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "skills-popup-item plan-implementation-choice";
+        button.setAttribute("role", "menuitem");
+        button.dataset.choice = choice.value;
+        button.textContent = `${index + 1}. ${choice.label}`;
+        button.addEventListener("click", () => choosePlanImplementation(choice.value));
+        button.addEventListener("keydown", (event) => {
+          if (event.isComposing || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+            event.preventDefault();
+            const next = (index + (event.key === "ArrowUp" ? -1 : 1) + DeepcodeComposer.PLAN_IMPLEMENTATION_CHOICES.length) % DeepcodeComposer.PLAN_IMPLEMENTATION_CHOICES.length;
+            planImplementationChoices.children[next].focus();
+          } else if (/^[1-4]$/.test(event.key)) {
+            event.preventDefault();
+            choosePlanImplementation(DeepcodeComposer.PLAN_IMPLEMENTATION_CHOICES[Number(event.key) - 1].value);
+          }
+        });
+        planImplementationChoices.appendChild(button);
+      });
+
+      function renderPlanImplementation() {
+        planImplementationMenu.hidden = !composerState.pendingPlanImplementation || isProcessing();
+      }
+
+      function choosePlanImplementation(choice) {
+        if (isProcessing()) return;
+        const pending = composerState.resolvePlanImplementation(choice);
+        if (!pending) return;
+        renderPlanImplementation();
+        renderPlanMode();
+        saveComposerState();
+        closeSlashMenu();
+        hideSkillsPopup();
+        vscode.postMessage({ type: "planImplementationChoice", ...pending, choice });
+        if (choice === "implement" || choice === "clear-context") {
+          planImplementationRunning = true;
+          setLoading(true, "processing");
+        }
+        promptInput.focus();
+      }
+
+      const planModeTag = document.getElementById("planModeTag");
+      const slashPopup = document.getElementById("slashPopup");
+      const slashPopupList = document.getElementById("slashPopupList");
+      const commandNotice = document.getElementById("commandNotice");
+      let slashMatches = [];
+      let slashIndex = 0;
+      let slashDismissedText = null;
+
+      function saveComposerState() {
+        vscode.setState({ sessionId: composerState.sessionId, drafts: composerState.save(promptInput.value) });
+      }
+
+      function renderPlanMode() {
+        planModeTag.hidden = !composerState.planMode;
+      }
+
+      document.getElementById("cancelPlanMode").addEventListener("click", () => {
+        if (composerState.pendingPlanImplementation) {
+          choosePlanImplementation("default");
+          return;
+        }
+        composerState.planMode = false;
+        renderPlanMode();
+        saveComposerState();
+        promptInput.focus();
+      });
+
+      function closeSlashMenu(dismiss = false) {
+        if (dismiss) slashDismissedText = promptInput.value;
+        slashPopup.classList.remove("show");
+        promptInput.setAttribute("aria-expanded", "false");
+        promptInput.removeAttribute("aria-activedescendant");
+      }
+
+      function refreshSlashMenu() {
+        const token = DeepcodeComposer.getSlashToken(promptInput.value);
+        slashMatches = token && !isProcessing() && slashDismissedText !== promptInput.value
+          ? DeepcodeComposer.filterSlashCommands(DeepcodeComposer.buildComposerCommands(availableSkills), token)
+          : [];
+        slashIndex = Math.max(0, Math.min(slashIndex, slashMatches.length - 1));
+        if (!slashMatches.length) { closeSlashMenu(); return; }
+        hideSkillsPopup();
+        slashPopupList.innerHTML = "";
+        slashMatches.forEach((item, index) => {
+          const row = document.createElement("div");
+          row.className = "skills-popup-item" + (index === slashIndex ? " selected" : "");
+          row.id = `slash-command-${index}`;
+          row.setAttribute("role", "option");
+          row.setAttribute("aria-selected", String(index === slashIndex));
+          const label = document.createElement("span");
+          label.className = "skills-popup-item-name";
+          label.textContent = DeepcodeComposer.formatSlashCommandLabel(item);
+          const description = document.createElement("span");
+          description.className = "skills-popup-item-path";
+          description.textContent = DeepcodeComposer.formatSlashCommandDescription(item.description);
+          row.title = description.textContent;
+          row.append(label, description);
+          row.addEventListener("mousedown", (event) => event.preventDefault());
+          row.addEventListener("click", () => selectSlashCommand(item));
+          slashPopupList.appendChild(row);
+        });
+        slashPopup.classList.add("show");
+        promptInput.setAttribute("aria-controls", "slashPopupList");
+        promptInput.setAttribute("aria-expanded", "true");
+        promptInput.setAttribute("aria-activedescendant", `slash-command-${slashIndex}`);
+        slashPopupList.children[slashIndex]?.scrollIntoView({ block: "nearest" });
+      }
+
+      function updateComposerInput() {
+        autoResizePrompt();
+        updateSendIconState();
+        saveComposerState();
+      }
+
+      function selectSlashCommand(item) {
+        if (isProcessing()) return;
+        promptInput.value = "";
+        closeSlashMenu();
+        commandNotice.hidden = true;
+        if (item.kind === "skill") {
+          if (!selectedSkills.some((skill) => skill.name === item.skill.name)) selectedSkills.push(item.skill);
+          renderSkillsTags();
+        } else if (item.kind === "skills") {
+          showSkillsPopup();
+        } else if (item.kind === "plan") {
+          composerState.planMode = true;
+          renderPlanMode();
+        } else {
+          if (item.kind === "init" || item.kind === "continue") composerState.resolvePlanImplementation("stay");
+          else composerState.pendingPlanImplementation = null;
+          renderPlanImplementation();
+          renderPlanMode();
+          vscode.postMessage({
+            type: "slashCommand", command: item.kind,
+            skills: item.kind === "init" ? selectedSkills : undefined,
+            planMode: composerState.requestMode({ continuation: item.kind === "continue" && Boolean(pendingPermissionReply) }),
+            ...(item.kind === "continue" ? pendingPermissionReply || {} : {})
+          });
+          selectedSkills = [];
+          attachmentManager?.clear();
+          renderSkillsTags();
+          if (item.kind === "init" || item.kind === "continue") {
+            pendingPermissionReply = null;
+          }
+        }
+        updateComposerInput();
+        promptInput.focus();
+      }
+
+      document.addEventListener("click", (event) => {
+        if (!slashPopup.contains(event.target) && event.target !== promptInput) closeSlashMenu(true);
+      });
+      promptInput.addEventListener("focus", refreshSlashMenu);
 
       function normalizePluginRateLimitedTool(value) {
         return value === "UnderstandImage" || value === "WebSearch" ? value : null;
@@ -394,6 +575,7 @@
 
       // Skills functions
       function showSkillsPopup() {
+        closeSlashMenu(true);
         if (skillsPopup) {
           skillsPopup.classList.add("show");
           // 渲染技能列表
@@ -1026,7 +1208,7 @@
       }
 
       function isAlwaysAllowedScope(scope) {
-        return [
+        return !composerState.sessionPlanMode && [
           "read-in-cwd",
           "read-in-tmp",
           "read-out-cwd",
@@ -1161,7 +1343,8 @@
         sendUserPromptText("/continue", undefined, [], {
           permissions: result.permissions,
           alwaysAllows: result.alwaysAllows,
-          skipHistory: true
+          skipHistory: true,
+          continuation: true
         });
       }
 
@@ -1725,6 +1908,7 @@
       }
 
       function setLoading(isLoading, status) {
+        isLoading = isLoading || planImplementationRunning;
         if (status !== undefined) {
           currentSessionStatus = status;
         }
@@ -1762,6 +1946,7 @@
         updateSendIconState();
         updateAskUserQuestionInteractivity();
         renderPermissionPrompt();
+        renderPlanImplementation();
       }
 
       function updateSendIconState() {
@@ -1923,6 +2108,7 @@
               <div class="session-dropdown-time">${formatSessionTime(session.updateTime)}</div>
             `;
             item.addEventListener("click", () => {
+              if (isProcessing()) return;
               sessionDropdown.classList.remove("show");
               sessionSelector.classList.remove("open");
               vscode.postMessage({ type: "selectSession", sessionId: session.id });
@@ -2001,6 +2187,11 @@
           sessionSelector.classList.remove("open");
           return;
         }
+        if (composerState.pendingPlanImplementation && !isProcessing()) {
+          event.preventDefault();
+          choosePlanImplementation("stay");
+          return;
+        }
         if (isProcessing()) {
           event.preventDefault();
           vscode.postMessage({ type: "interrupt" });
@@ -2009,31 +2200,19 @@
         }
       });
 
-      // 从状态恢复输入内容
-      const savedState = vscode.getState();
-      if (savedState && savedState.promptText) {
-        promptInput.value = savedState.promptText || "";
-        autoResizePrompt();
-        updateSendIconState();
-      }
-
-      // 监听 visibilitychange 保存状态
+      // Restore the draft belonging to the last selected session.
+      promptInput.value = savedDraft?.text ?? savedState.promptText ?? "";
+      renderPlanMode();
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") {
-          vscode.setState({
-            promptText: promptInput.value
-          });
-        }
+        if (document.visibilityState === "hidden") saveComposerState();
       });
-
       promptInput.addEventListener("input", () => {
-        exitHistoryBrowsing(); // any text modification exits history browsing mode
-        autoResizePrompt();
-        updateSendIconState();
-        // 保存输入内容
-        vscode.setState({
-          promptText: promptInput.value
-        });
+        exitHistoryBrowsing();
+        slashDismissedText = null;
+        slashIndex = 0;
+        commandNotice.hidden = true;
+        updateComposerInput();
+        refreshSlashMenu();
       });
 
       updateSendIconState();
@@ -2052,10 +2231,18 @@
           return false;
         }
 
+        // Submitting a reply is equivalent to choosing to stay in Plan mode.
+        composerState.resolvePlanImplementation("stay");
+        renderPlanImplementation();
+        renderPlanMode();
+        saveComposerState();
         historyCursor = -1;
         draftBeforeHistory = null;
         pendingUserPrompt = options.skipHistory ? null : trimmed || (normalizedImages.length > 0 ? "粘贴的图像" : "");
 
+        commandNotice.hidden = true;
+        closeSlashMenu();
+        setLoading(true, "processing");
         vscode.postMessage({
           type: "userPrompt",
           prompt: trimmed,
@@ -2063,7 +2250,8 @@
           images: normalizedImages.length > 0 ? normalizedImages : undefined,
           permissions,
           alwaysAllows,
-          isAnswers: isAnswers || undefined
+          isAnswers: isAnswers || undefined,
+          planMode: composerState.requestMode(options)
         });
         return true;
       }
@@ -2085,12 +2273,24 @@
           return;
         }
 
+        const submission = DeepcodeComposer.resolveSlashSubmission(
+          DeepcodeComposer.buildComposerCommands(availableSkills), text
+        );
+        if (submission?.kind === "command") {
+          selectSlashCommand(submission.item);
+          return;
+        }
+
         // 发送消息，不立即显示（等待后端返回渲染后的 HTML）
         promptInput.value = "";
-        vscode.setState({ promptText: "" });
+        saveComposerState();
         autoResizePrompt();
         const permissionReply = pendingPermissionReply;
-        const sent = sendUserPromptText(text, selectedSkills, imageUrls, permissionReply || {});
+        const sent = sendUserPromptText(
+          submission?.kind === "plan" ? submission.text : text,
+          selectedSkills, imageUrls,
+          { ...(permissionReply || {}), continuation: Boolean(permissionReply), ...(submission?.kind === "plan" ? { planMode: true } : {}) }
+        );
         if (!sent) {
           return;
         }
@@ -2109,10 +2309,11 @@
       });
 
       newSessionBtn.addEventListener("click", () => {
+        if (isProcessing()) return;
         sessionDropdown.classList.remove("show");
         sessionSelector.classList.remove("open");
+        saveComposerState();
         vscode.postMessage({ type: "createNewSession" });
-        promptInput.value = "";
         inputHistory = [];
         historyCursor = -1;
         draftBeforeHistory = null;
@@ -2124,6 +2325,26 @@
 
       sendButton.addEventListener("click", sendPrompt);
       promptInput.addEventListener("keydown", (event) => {
+        if (event.isComposing) return;
+        if (slashPopup.classList.contains("show") && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            closeSlashMenu(true);
+            return;
+          }
+          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+            event.preventDefault();
+            slashIndex = (slashIndex + (event.key === "ArrowUp" ? -1 : 1) + slashMatches.length) % slashMatches.length;
+            refreshSlashMenu();
+            return;
+          }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            selectSlashCommand(slashMatches[slashIndex]);
+            return;
+          }
+        }
         // History navigation: only intercept ArrowUp/Down at the very start/end of the textarea.
         // Otherwise keep native cursor movement (line up/down).
         const noModifier = !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
@@ -2140,7 +2361,8 @@
         function applyPromptValue(value, caret = "end") {
           promptInput.value = value;
           autoResizePrompt();
-          vscode.setState({ promptText: promptInput.value });
+          saveComposerState();
+          refreshSlashMenu();
           updateSendIconState();
           promptInput.focus();
           const len = promptInput.value.length;
@@ -2227,6 +2449,47 @@
 
       window.addEventListener("message", (event) => {
         const message = event.data;
+        if (message.type === "planImplementation") {
+          if (composerState.offerPlanImplementation({ id: message.id, sessionId: message.sessionId })) {
+            closeSlashMenu();
+            hideSkillsPopup();
+            renderPlanImplementation();
+          }
+          return;
+        }
+        if (message.type === "commandNotice") {
+          commandNotice.textContent = message.text;
+          commandNotice.hidden = false;
+          return;
+        }
+        if (message.type === "commandBusy") {
+          commandBusy = Boolean(message.value);
+          closeSlashMenu();
+          setLoading(commandBusy || isBusyStatus(currentSessionStatus), currentSessionStatus);
+          return;
+        }
+        if (message.type === "openSessionPicker") {
+          if (!sessionDropdown.classList.contains("show")) toggleSessionDropdown();
+          return;
+        }
+        if (message.type === "initializeEmpty" || message.type === "loadSession") {
+          // Carry forward drafts saved before per-session draft storage was introduced.
+          if (!hasLoadedSession && !savedState.drafts && savedState.promptText) {
+            composerState.sessionId = message.sessionId || null;
+          }
+          hasLoadedSession = true;
+          promptInput.value = composerState.load(
+            message.type === "loadSession" ? message.sessionId : null,
+            message.planMode === true, promptInput.value, message.fresh === true
+          );
+          selectedSkills = [];
+          renderSkillsTags();
+          renderPlanMode();
+          renderPlanImplementation();
+          updateComposerInput();
+          closeSlashMenu();
+          hideSkillsPopup();
+        }
         if (message.type === "initializeEmpty") {
           // 初始化空聊天
           clearMessages();
@@ -2337,6 +2600,10 @@
           if (message.sessionId && currentSessionId && message.sessionId !== currentSessionId) {
             return;
           }
+          if (message.sessionId) {
+            composerState.updateSession(message.sessionId, message.planMode === true);
+            saveComposerState();
+          }
           const nextStatus = message.status || null;
           if (!currentSessionId && message.sessionId) {
             currentSessionId = message.sessionId;
@@ -2356,7 +2623,7 @@
           if ('tokenTelemetry' in message) {
             updateContextMeter(message.tokenTelemetry);
           }
-          setLoading(isBusyStatus(nextStatus), nextStatus);
+          setLoading(commandBusy || isBusyStatus(nextStatus), nextStatus);
           renderPermissionPrompt();
           renderPluginRateLimitNotice();
         } else if (message.type === "llmStreamProgress") {
@@ -2416,9 +2683,10 @@
           const shouldConnect = lastMessageRole !== null && lastMessageRole !== "user";
           addBubble(message.html || message.content || "", "assistant", message.meta, shouldConnect, message.content || "");
         } else if (message.type === "loading") {
+          if (!message.value) planImplementationRunning = false;
           // 加载状态
-          const newStatus = message.value ? "processing" : currentSessionStatus;
-          setLoading(Boolean(message.value), newStatus);
+          const newStatus = message.value ? "processing" : ("status" in message ? message.status : currentSessionStatus);
+          setLoading(commandBusy || Boolean(message.value), newStatus);
         } else if(message.type === "appendMessage") {
           // 新增消息
           addMessageBubble(message.message, message.shouldConnect);
@@ -2443,7 +2711,7 @@
           // 如果是普通 assistant 消息（不是思考），说明本轮回复已完成，标记为 completed
           if (message.message.role === "assistant" && message.message.meta?.asThinking !== true) {
             currentSessionStatus = "completed";
-            setLoading(false, currentSessionStatus);
+            setLoading(commandBusy, currentSessionStatus);
           }
 
           // 如果是新的 asThinking 为 true 的消息，展开最新的思考气泡
@@ -2463,6 +2731,7 @@
           // 接收可用技能列表
           availableSkills = message.skills || [];
           updateSkillsButtonTooltip();
+          refreshSlashMenu();
         }
       });
 
@@ -2476,7 +2745,7 @@
       });
 
       // webview 准备就绪，请求初始数据
-      vscode.postMessage({ type: "ready" });
+      vscode.postMessage({ type: "ready", ...(Object.hasOwn(savedState, "sessionId") ? { sessionId: savedState.sessionId } : {}) });
 
       // 请求可用技能列表
       vscode.postMessage({ type: "requestSkills" });

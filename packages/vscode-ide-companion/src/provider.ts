@@ -2,6 +2,13 @@
  * Message handling logic for the Deepcoding webview provider.
  * Extracted from extension.ts for testability — no direct vscode dependency.
  */
+import { randomUUID } from "node:crypto";
+import {
+  getCompletedProposedPlan,
+  getImplementationPrompt,
+  getClearContextImplementationPrompt,
+  PLAN_IMPLEMENTATION_CHOICES,
+} from "@vegamo/deepcode-core/common/plan-implementation";
 import type { SessionManager } from "@vegamo/deepcode-core";
 import type { PermissionScope, SkillInfo, UserToolPermission } from "@vegamo/deepcode-core";
 import { prepareToolDiffContent } from "./tool-diff.js";
@@ -23,10 +30,35 @@ export interface ProviderDeps {
     | "interruptActiveSession"
     | "denySessionPermission"
     | "listSkills"
+    | "forkSession"
+    | "compactSession"
   >;
   postMessage: PostMessageFn;
   renderMarkdown: (text: string) => string;
   copyToClipboard: (text: string) => void;
+}
+
+const compactions = new WeakMap<ProviderDeps["sessionManager"], AbortController>();
+type PendingPlan = { id: string; sessionId: string; plan: string };
+const pendingPlans = new WeakMap<ProviderDeps["sessionManager"], PendingPlan>();
+
+function sendPendingPlan(manager: ProviderDeps["sessionManager"], postMessage: PostMessageFn): void {
+  const pending = pendingPlans.get(manager);
+  if (pending && pending.sessionId === manager.getActiveSessionId()) {
+    postMessage({ type: "planImplementation", id: pending.id, sessionId: pending.sessionId });
+  }
+}
+
+const activeRequests = new WeakSet<ProviderDeps["sessionManager"]>();
+
+function isBusy(manager: ProviderDeps["sessionManager"]): boolean {
+  const session = manager.getSession(manager.getActiveSessionId() ?? "");
+  return (
+    activeRequests.has(manager) ||
+    compactions.has(manager) ||
+    session?.status === "processing" ||
+    session?.status === "pending"
+  );
 }
 
 export interface SessionSummary {
@@ -63,7 +95,18 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
   const msg = message as Record<string, unknown>;
 
   if (msg.type === "ready") {
-    loadInitialSession(sessionManager, postMessage, renderMarkdown);
+    const activeSessionId = sessionManager.getActiveSessionId();
+    if (isBusy(sessionManager) && activeSessionId && sessionManager.getSession(activeSessionId)) {
+      loadSession(activeSessionId, sessionManager, postMessage, renderMarkdown);
+    } else if (typeof msg.sessionId === "string" && sessionManager.getSession(msg.sessionId)) {
+      loadSession(msg.sessionId, sessionManager, postMessage, renderMarkdown);
+    } else if (msg.sessionId === null) {
+      await createNewSession(sessionManager, postMessage, false);
+    } else {
+      loadInitialSession(sessionManager, postMessage, renderMarkdown);
+    }
+    sendPendingPlan(sessionManager, postMessage);
+    if (compactions.has(sessionManager)) postMessage({ type: "commandBusy", value: true });
     await sendSkillsList(sessionManager, postMessage);
     return true;
   }
@@ -73,7 +116,18 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
     return true;
   }
 
+  if (msg.type === "planImplementationChoice") {
+    if (!isBusy(sessionManager)) await handlePlanImplementationChoice(msg, deps);
+    return true;
+  }
+
+  if (msg.type === "slashCommand") {
+    if (!isBusy(sessionManager)) await handleSlashCommand(msg, deps);
+    return true;
+  }
+
   if (msg.type === "userPrompt") {
+    if (isBusy(sessionManager)) return true;
     const prompt = String(msg.prompt || "").trim();
     const images = Array.isArray(msg.images)
       ? (msg.images as unknown[]).filter((image): image is string => typeof image === "string" && image.length > 0)
@@ -84,15 +138,27 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
       return true;
     }
     const skills = (msg.skills as SkillInfo[]) || [];
-    await handlePrompt(prompt, skills, images, sessionManager, postMessage, renderMarkdown, {
-      permissions: permissions.length > 0 ? permissions : undefined,
-      alwaysAllows: alwaysAllows.length > 0 ? alwaysAllows : undefined,
-      isAnswers: msg.isAnswers === true ? true : undefined,
-    });
+    const pending = pendingPlans.get(sessionManager);
+    const continuesPlan = pending?.sessionId === sessionManager.getActiveSessionId();
+    pendingPlans.delete(sessionManager);
+    activeRequests.add(sessionManager);
+    try {
+      await handlePrompt(prompt, skills, images, sessionManager, postMessage, renderMarkdown, {
+        permissions: permissions.length > 0 ? permissions : undefined,
+        alwaysAllows: alwaysAllows.length > 0 ? alwaysAllows : undefined,
+        isAnswers: msg.isAnswers === true ? true : undefined,
+        planMode: continuesPlan || msg.planMode === true,
+      });
+    } finally {
+      activeRequests.delete(sessionManager);
+    }
+    sendPendingPlan(sessionManager, postMessage);
     return true;
   }
 
   if (msg.type === "interrupt") {
+    pendingPlans.delete(sessionManager);
+    compactions.get(sessionManager)?.abort();
     sessionManager.interruptActiveSession();
     return true;
   }
@@ -106,13 +172,16 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
   }
 
   if (msg.type === "createNewSession") {
+    if (isBusy(sessionManager)) return true;
     await createNewSession(sessionManager, postMessage);
     return true;
   }
 
   if (msg.type === "selectSession") {
+    if (isBusy(sessionManager)) return true;
     const sessionId = String(msg.sessionId || "").trim();
     if (sessionId) {
+      pendingPlans.delete(sessionManager);
       loadSession(sessionId, sessionManager, postMessage, renderMarkdown);
       await sendSkillsList(sessionManager, postMessage, sessionId);
     }
@@ -172,6 +241,7 @@ export function loadSession(
     return;
   }
 
+  if (pendingPlans.get(sessionManager)?.sessionId !== sessionId) pendingPlans.delete(sessionManager);
   sessionManager.setActiveSessionId(sessionId);
   const messages = sessionManager.listSessionMessages(sessionId);
   const sessions = sessionManager.listSessions();
@@ -181,6 +251,7 @@ export function loadSession(
     sessionId,
     summary: session.summary || "Untitled",
     status: session.status,
+    planMode: session.planMode === true,
     pluginRateLimitedTool: session.pluginRateLimitedTool ?? null,
     askPermissions: session.askPermissions,
     processes: serializeProcesses(session.processes),
@@ -211,13 +282,16 @@ function showSessionsList(sessionManager: ProviderDeps["sessionManager"], postMe
 
 async function createNewSession(
   sessionManager: ProviderDeps["sessionManager"],
-  postMessage: PostMessageFn
+  postMessage: PostMessageFn,
+  fresh = true
 ): Promise<void> {
+  pendingPlans.delete(sessionManager);
   sessionManager.setActiveSessionId(null);
   const sessions = sessionManager.listSessions();
 
   postMessage({
     type: "initializeEmpty",
+    fresh,
     sessions: toSessionList(sessions),
     status: null,
   });
@@ -240,7 +314,12 @@ async function handlePrompt(
   sessionManager: ProviderDeps["sessionManager"],
   postMessage: PostMessageFn,
   renderMarkdown: (text: string) => string,
-  options: { permissions?: UserToolPermission[]; alwaysAllows?: PermissionScope[]; isAnswers?: boolean } = {}
+  options: {
+    permissions?: UserToolPermission[];
+    alwaysAllows?: PermissionScope[];
+    isAnswers?: boolean;
+    planMode?: boolean;
+  } = {}
 ): Promise<void> {
   const normalizedImages = imageUrls.filter(Boolean);
   const displayPrompt = prompt || (normalizedImages.length > 0 ? "粘贴的图像" : "");
@@ -268,16 +347,25 @@ async function handlePrompt(
       permissions: options.permissions,
       alwaysAllows: options.alwaysAllows,
       isAnswers: options.isAnswers,
+      planMode: options.planMode === true,
     });
     await sendSkillsList(sessionManager, postMessage);
 
     const activeSessionId = sessionManager.getActiveSessionId();
     const activeSession = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
+    const plan = getCompletedProposedPlan(
+      options.planMode === true,
+      activeSession?.status,
+      activeSession?.assistantReply ?? null
+    );
+    if (plan && activeSessionId)
+      pendingPlans.set(sessionManager, { id: randomUUID(), sessionId: activeSessionId, plan });
     if (activeSessionId && activeSession) {
       postMessage({
         type: "sessionStatus",
         sessionId: activeSessionId,
         status: activeSession.status,
+        planMode: activeSession.planMode === true,
         pluginRateLimitedTool: activeSession.pluginRateLimitedTool ?? null,
         askPermissions: activeSession.askPermissions,
         processes: serializeProcesses(activeSession.processes),
@@ -296,7 +384,12 @@ async function handlePrompt(
       html: renderMarkdown(`Request failed: ${message}`),
     });
   } finally {
-    postMessage({ type: "loading", value: false });
+    const sessionId = sessionManager.getActiveSessionId();
+    postMessage({
+      type: "loading",
+      value: false,
+      status: sessionId ? (sessionManager.getSession(sessionId)?.status ?? null) : null,
+    });
   }
 }
 
@@ -312,6 +405,7 @@ function handlePermissionDenied(
       type: "sessionStatus",
       sessionId,
       status: session.status,
+      planMode: session.planMode === true,
       pluginRateLimitedTool: session.pluginRateLimitedTool ?? null,
       askPermissions: session.askPermissions,
       processes: serializeProcesses(session.processes),
@@ -331,4 +425,109 @@ function serializeProcesses(
     serialized[pid] = entry;
   }
   return serialized;
+}
+
+async function handleSlashCommand(msg: Record<string, unknown>, deps: ProviderDeps): Promise<void> {
+  const { sessionManager: manager, postMessage, renderMarkdown } = deps;
+  const command = msg.command;
+  pendingPlans.delete(manager);
+  const sessionId = manager.getActiveSessionId();
+  const notice = (text: string) => postMessage({ type: "commandNotice", text });
+  try {
+    if (command === "new") {
+      await createNewSession(manager, postMessage);
+    } else if (command === "resume" || (command === "continue" && (!sessionId || !manager.getSession(sessionId)))) {
+      showSessionsList(manager, postMessage);
+      postMessage({ type: "openSessionPicker" });
+    } else if (command === "fork") {
+      if (!sessionId) {
+        notice("No active conversation to fork.");
+        return;
+      }
+      const forkId = manager.forkSession(sessionId);
+      loadSession(forkId, manager, postMessage, renderMarkdown);
+      await sendSkillsList(manager, postMessage, forkId);
+    } else if (command === "compact") {
+      if (!sessionId) {
+        notice("No active conversation to compact.");
+        return;
+      }
+      const controller = new AbortController();
+      compactions.set(manager, controller);
+      postMessage({ type: "commandBusy", value: true });
+      try {
+        const changed = await manager.compactSession(sessionId, controller.signal);
+        if (!changed) notice("Conversation was not compacted.");
+      } catch (error) {
+        notice(
+          controller.signal.aborted
+            ? "Compaction cancelled."
+            : `Compaction failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      } finally {
+        compactions.delete(manager);
+        postMessage({ type: "commandBusy", value: false });
+        const session = manager.getSession(sessionId);
+        if (session)
+          postMessage({
+            type: "sessionStatus",
+            sessionId,
+            status: session.status,
+            planMode: session.planMode === true,
+          });
+        showSessionsList(manager, postMessage);
+      }
+    } else if (command === "init" || command === "continue") {
+      await handleWebviewMessage(
+        {
+          ...msg,
+          type: "userPrompt",
+          prompt: `/${command}`,
+          images: [],
+        },
+        deps
+      );
+    }
+  } catch (error) {
+    notice(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function handlePlanImplementationChoice(msg: Record<string, unknown>, deps: ProviderDeps): Promise<void> {
+  const { sessionManager: manager, postMessage, renderMarkdown } = deps;
+  const pending = pendingPlans.get(manager);
+  const choice = msg.choice;
+  if (
+    !pending ||
+    pending.id !== msg.id ||
+    pending.sessionId !== msg.sessionId ||
+    pending.sessionId !== manager.getActiveSessionId() ||
+    !PLAN_IMPLEMENTATION_CHOICES.some((item) => item.value === choice)
+  )
+    return;
+
+  pendingPlans.delete(manager);
+  if (choice === "stay" || choice === "default") return;
+
+  activeRequests.add(manager);
+  try {
+    if (choice === "clear-context") await createNewSession(manager, postMessage);
+    const prompt =
+      choice === "clear-context"
+        ? getClearContextImplementationPrompt(pending.plan)
+        : getImplementationPrompt(pending.plan);
+    await handlePrompt(prompt, [], [], manager, postMessage, renderMarkdown, { planMode: false });
+  } catch (error) {
+    postMessage({
+      type: "commandNotice",
+      text: `Request failed: ${error instanceof Error ? error.message : String(error)}`,
+    });
+    postMessage({
+      type: "loading",
+      value: false,
+      status: manager.getSession(manager.getActiveSessionId() ?? "")?.status ?? null,
+    });
+  } finally {
+    activeRequests.delete(manager);
+  }
 }
