@@ -45,6 +45,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `telemetryEnabled`   | boolean   | 是否启用匿名使用数据上报（默认 `true`）                              |
 | `notify`             | string    | 任务完成通知脚本的完整路径（如 Slack 通知脚本）                      |
 | `webSearchTool`      | string    | 自定义联网搜索脚本的完整路径                                         |
+| `deepseekSearchApiEnabled` | boolean | 是否使用 DeepSeek 官方网页搜索（默认 `false`） |
 | `mcpServers`         | object    | MCP 服务器配置（键为服务名，值为 McpServerConfig 对象）              |
 | `temperature`        | number    | 模型采样温度，范围 `0` 到 `2`                           |
 | `permissions`        | object    | 权限策略及 `addWorkingDirs` 额外工作目录配置（参见 [permission.md](./permission.md)） |
@@ -176,6 +177,12 @@ Deep Code 内置免费可用的 Web Search 工具。如果需要自定义搜索�
 ```
 
 脚本接收一个搜索查询参数，输出 JSON 格式的结果供 AI 使用。
+
+#### `deepseekSearchApiEnabled` — 启用 DeepSeek 网页搜索 API
+
+Deep Code 支持最新的[DeepSeek官方网页搜索API](https://api-docs.deepseek.com/zh-cn/guides/search)。设置 `deepseekSearchApiEnabled: true`，且当前连接的 `BASE_URL` 为 `https://api.deepseek.com` 时启用。按照官方文档介绍（截止2026-10-30），网页搜索按请求次数计费，不按 token 或返回结果条数计费，网页搜索每 1,000 次成功请求	5元。
+
+`deepseekSearchApiEnabled` 默认值为 `false`。关闭开关或使用其他 API 地址时，保持原有搜索行为。
 
 #### `enabledSkills` — Skill 启用配置
 

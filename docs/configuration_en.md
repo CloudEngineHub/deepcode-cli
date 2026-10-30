@@ -45,6 +45,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `telemetryEnabled` | boolean | Enable anonymous usage reporting (default `true`)                           |
 | `notify`           | string  | Full path to a task-completion notification script (e.g., Slack notification script) |
 | `webSearchTool`    | string  | Full path to a custom web search script                                     |
+| `deepseekSearchApiEnabled` | boolean | Use DeepSeek official web search (default `false`) |
 | `mcpServers`       | object  | MCP server configurations (keys are service names, values are McpServerConfig objects) |
 | `temperature`      | number  | Sampling temperature for LLM, from `0` to `2`                 |
 | `permissions`      | object  | Permission policy and additional `addWorkingDirs` workspace roots (see [permission_en.md](./permission_en.md)) |
@@ -176,6 +177,12 @@ Deep Code has a built-in, free-to-use Web Search tool. If you need custom search
 ```
 
 The script receives a search query as an argument and outputs results in JSON format for the AI.
+
+#### `deepseekSearchApiEnabled` — Enable the DeepSeek Web Search API
+
+Deep Code supports the latest [DeepSeek official web search API](https://api-docs.deepseek.com/guides/search). Set `deepseekSearchApiEnabled: true` to enable it when the `BASE_URL` is `https://api.deepseek.com`. According to the official documentation as of October 30, 2026, web search is billed per request, rather than by tokens or the number of results returned, at $0.75 per 1,000 successful requests.
+
+`deepseekSearchApiEnabled` defaults to `false`. When disabled or using another API address, the existing search behavior applies.
 
 #### `enabledSkills` — Skill Enablement
 

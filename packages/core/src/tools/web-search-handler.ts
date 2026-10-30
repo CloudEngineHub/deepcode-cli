@@ -1,3 +1,5 @@
+import { DEFAULT_BASE_URL } from "../settings";
+import { executeDeepSeekWebSearch } from "./deepseek-search";
 import { resolvePlusHost } from "../common/plus-subscription";
 import { bindProcessAbort } from "../common/process-abort";
 import { buildThinkingRequestOptions } from "../common/openai-thinking";
@@ -51,6 +53,9 @@ export async function handleWebSearchTool(
   }
 
   const llmContext = context.createOpenAIClient?.();
+  if (llmContext?.deepseekSearchApiEnabled === true && llmContext.baseURL === DEFAULT_BASE_URL) {
+    return executeDeepSeekWebSearch(query, llmContext.apiKey, context, formatWebSearchActivityLabel(query));
+  }
   const scriptPath = llmContext?.webSearchTool?.trim();
   if (scriptPath) {
     return executeConfiguredWebSearch(query, scriptPath, context, llmContext?.env ?? {});

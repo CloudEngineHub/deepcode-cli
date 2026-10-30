@@ -1,10 +1,36 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import * as os from "node:os";
+import os from "node:os";
 import * as path from "node:path";
 import { Models } from "openai/resources/models";
-import { createOpenAIClientFactory, DEEPCODE_PLUS_BASE_URL, resolveOpenAIConnection } from "../common/openai-client";
+import {
+  createOpenAIClient,
+  createOpenAIClientFactory,
+  DEEPCODE_PLUS_BASE_URL,
+  resolveOpenAIConnection,
+} from "../common/openai-client";
+
+test("client factory passes fresh search settings through missing, new and cached clients", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-search-settings-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.mock.method(os, "homedir", () => root);
+  t.mock.method(Models.prototype, "list", async () => ({ data: [] }));
+  const settingsFile = path.join(root, "settings.json");
+  fs.writeFileSync(settingsFile, JSON.stringify({ deepseekSearchApiEnabled: true }));
+  const connection = { baseURL: "https://api.deepseek.com", usingPlus: false };
+  const missing = createOpenAIClient(root, { connection }, settingsFile);
+  assert.equal(missing.client, null);
+  assert.equal(missing.deepseekSearchApiEnabled, true);
+  const context = { connection: { ...connection, apiKey: "sk-search-factory-test" } };
+  const first = createOpenAIClient(root, context, settingsFile);
+  assert.equal(first.deepseekSearchApiEnabled, true);
+  assert.equal(createOpenAIClient(root, context, settingsFile).deepseekSearchApiEnabled, true);
+  fs.writeFileSync(settingsFile, JSON.stringify({ deepseekSearchApiEnabled: false }));
+  const cached = createOpenAIClient(root, context, settingsFile);
+  assert.equal(cached.client, first.client);
+  assert.equal(cached.deepseekSearchApiEnabled, false);
+});
 
 test("resolveOpenAIConnection falls back to DeepCode Plus credentials", () => {
   const resolved = resolveOpenAIConnection(

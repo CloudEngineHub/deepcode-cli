@@ -44,6 +44,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `telemetryEnabled`         | boolean       | 是否启用匿名使用数据上报（默认 `true`）                                               |
 | `notify`                   | string        | 任务完成通知脚本的完整路径（如 Slack 通知脚本）                                       |
 | `webSearchTool`            | string        | 自定义联网搜索脚本的完整路径                                                          |
+| `deepseekSearchApiEnabled` | boolean | 是否使用 DeepSeek 官方网页搜索（默认 `false`） |
 | `mcpServers`               | object        | MCP 服务器配置（键为服务名，值为 McpServerConfig 对象）                               |
 | `temperature`              | number        | 模型采样温度，范围 `0` 到 `2`                                                         |
 | `permissions`              | object        | 权限策略及 `addWorkingDirs` 额外工作目录配置（参见 [permission.md](./permission.md)） |
@@ -151,6 +152,12 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 ```
 
 > 详细的 Slack、飞书、终端通知、系统通知等配置示例，请参阅 [notify.md](notify.md)。
+
+#### `deepseekSearchApiEnabled` — DeepSeek 网页搜索
+
+设置 `deepseekSearchApiEnabled: true`，且当前连接的 `BASE_URL` 为 `https://api.deepseek.com` 时，使用 [DeepSeek 官方网页搜索](https://api-docs.deepseek.com/zh-cn/guides/search)。使用当前连接的 API 密钥，优先于 `webSearchTool`。搜索查询直接提交、不作翻译，长度不能超过 128 个 Unicode 字符。搜索失败时返回错误，不切换到其他搜索服务。
+
+默认值为 `false`。关闭开关或使用其他 API 地址时，保持原有搜索行为。
 
 #### `webSearchTool` — 自定义联网搜索
 

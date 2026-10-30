@@ -407,6 +407,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     debugLogEnabled: boolean;
     notify?: string;
     webSearchTool?: string;
+    deepseekSearchApiEnabled?: boolean;
     env?: Record<string, string>;
     machineId?: string;
     plusApiKey?: string;
@@ -416,7 +417,16 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     const settings = this.resolveCurrentSettings();
     const { plusApiKey, connection } = context;
 
-    const { model, thinkingEnabled, reasoningEffort, debugLogEnabled, notify, webSearchTool, env } = settings;
+    const {
+      model,
+      thinkingEnabled,
+      reasoningEffort,
+      debugLogEnabled,
+      notify,
+      webSearchTool,
+      deepseekSearchApiEnabled,
+      env,
+    } = settings;
     const { apiKey, baseURL } = connection;
     const machineId = vscode.env.machineId;
 
@@ -431,6 +441,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         debugLogEnabled,
         notify,
         webSearchTool,
+        deepseekSearchApiEnabled,
         env,
         machineId,
         plusApiKey,
@@ -454,6 +465,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       debugLogEnabled,
       notify,
       webSearchTool,
+      deepseekSearchApiEnabled,
       env,
       machineId,
       plusApiKey,

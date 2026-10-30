@@ -21,6 +21,26 @@ function fixture(t: TestContext) {
   return { root, home, projectRoot, write, user, project, plus, env: {} };
 }
 
+test("DeepSeek search settings default off and trace user/project overrides", (t) => {
+  const f = fixture(t);
+  let report = inspectSettings(f);
+  assert.equal(report.settings?.deepseekSearchApiEnabled, false);
+  assert.deepEqual(report.trace.sources.deepseekSearchApiEnabled, ["default"]);
+  f.write(f.user, { deepseekSearchApiEnabled: true });
+  report = inspectSettings(f);
+  assert.equal(report.settings?.deepseekSearchApiEnabled, true);
+  assert.deepEqual(report.trace.sources.deepseekSearchApiEnabled, ["user.deepseekSearchApiEnabled"]);
+  assert.ok(!report.checks.some((check) => check.name === "Unknown configuration field"));
+  f.write(f.project, { deepseekSearchApiEnabled: false });
+  report = inspectSettings(f);
+  assert.equal(report.settings?.deepseekSearchApiEnabled, false);
+  assert.deepEqual(report.trace.sources.deepseekSearchApiEnabled, ["project.deepseekSearchApiEnabled"]);
+  f.write(f.project, { deepseekSearchApiEnabled: "invalid" });
+  report = inspectSettings(f);
+  assert.equal(report.settings?.deepseekSearchApiEnabled, true);
+  assert.ok(report.trace.ignored.some((item) => item.source === "project.deepseekSearchApiEnabled"));
+});
+
 test("doctor traces effective precedence, fallback and merged settings without changing resolution", () => {
   const user = {
     model: "same",
