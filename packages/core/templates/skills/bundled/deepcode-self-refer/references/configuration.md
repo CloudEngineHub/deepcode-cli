@@ -42,7 +42,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `maxRequestFilesBytes`     | number        | 单次请求图片原始字节总上限，默认 `134217728`（128 MiB）                               |
 | `debugLogEnabled`          | boolean       | 是否启用调试日志输出（默认 `false`）                                                  |
 | `telemetryEnabled`         | boolean       | 是否启用匿名使用数据上报（默认 `true`）                                               |
-| `notify`                   | string        | 任务完成通知脚本的完整路径（如 Slack 通知脚本）                                       |
+| `notify`                   | string        | 任务状态通知脚本的完整路径（如 Slack 通知脚本）                                       |
 | `webSearchTool`            | string        | 自定义联网搜索脚本的完整路径                                                          |
 | `deepseekSearchApiEnabled` | boolean | 是否使用 DeepSeek 官方网页搜索（默认 `false`） |
 | `mcpServers`               | object        | MCP 服务器配置（键为服务名，值为 McpServerConfig 对象）                               |
@@ -131,16 +131,16 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 
 单个文件最大 64 MiB，上传超时不能超过 10 分钟。远端文件 ID 缓存在 `~/.deepcode/files-api-cache.json`，其中不保存明文 API Key。配额不足时只清理文件名以 `deepcode-` 开头的最旧文件，然后重试一次。
 
-#### `notify` — 任务完成通知
+#### `notify` — 任务状态通知
 
-设置一个 Shell 脚本的完整路径。当 AI 助手完成一轮任务后，会自动执行该脚本，可用于发送通知（如 Slack 消息）。
+设置一个 Shell 脚本的完整路径。当会话完成、失败、等待用户输入或等待权限确认时，会自动执行该脚本，可用于发送通知（如 Slack 消息）。恢复执行后再次暂停或结束时，会再次通知。
 
 通知脚本执行时，会通过环境变量注入以下上下文信息：
 
 | 环境变量      | 说明                                  |
 | ------------- | ------------------------------------- |
-| `DURATION`    | 会话耗时，单位秒（整数）              |
-| `STATUS`      | 会话状态：`"completed"` 或 `"failed"` |
+| `DURATION`    | 本次执行从开始到暂停或结束的耗时，单位秒（整数）；恢复执行后重新计时              |
+| `STATUS`      | 实际会话状态：`completed`（完成）、`failed`（失败）、`waiting_for_user`（等待用户输入）或 `ask_permission`（等待权限确认） |
 | `FAIL_REASON` | 失败原因（仅失败时设置）              |
 | `BODY`        | 最后一条 AI 助手回复的文本内容        |
 | `TITLE`       | 会话标题（对应 resume 列表中的标题）  |

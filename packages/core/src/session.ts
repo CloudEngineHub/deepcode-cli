@@ -1763,7 +1763,7 @@ ${agentInstructions}
         ),
         false
       );
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      this.maybeNotifySessionStatus(sessionId, notify, startedAt, env);
       return;
     }
 
@@ -1775,7 +1775,7 @@ ${agentInstructions}
         failReason: "interrupted",
         updateTime: now,
       }));
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      this.maybeNotifySessionStatus(sessionId, notify, startedAt, env);
       return;
     }
 
@@ -1951,7 +1951,7 @@ ${agentInstructions}
       if (this.sessionControllers.get(sessionId) === sessionController) {
         this.sessionControllers.delete(sessionId);
       }
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      this.maybeNotifySessionStatus(sessionId, notify, startedAt, env);
     }
   }
 
@@ -3653,7 +3653,7 @@ ${agentInstructions}
     }
   }
 
-  private maybeNotifyTaskCompletion(
+  private maybeNotifySessionStatus(
     sessionId: string,
     notifyCommand: string | undefined,
     startedAt: number,
@@ -3664,7 +3664,13 @@ ${agentInstructions}
     }
 
     const session = this.getSession(sessionId);
-    if (!session || (session.status !== "completed" && session.status !== "failed")) {
+    if (
+      !session ||
+      (session.status !== "completed" &&
+        session.status !== "failed" &&
+        session.status !== "waiting_for_user" &&
+        session.status !== "ask_permission")
+    ) {
       return;
     }
 

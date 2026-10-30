@@ -42,7 +42,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `maxRequestFilesBytes`     | number        | Raw image byte limit per request, default `134217728` (128 MiB)                                                      |
 | `debugLogEnabled`          | boolean       | Enable debug log output (default `false`)                                                                            |
 | `telemetryEnabled`         | boolean       | Enable anonymous usage reporting (default `true`)                                                                    |
-| `notify`                   | string        | Full path to a task-completion notification script (e.g., Slack notification script)                                 |
+| `notify`                   | string        | Full path to a task-status notification script (e.g., Slack notification script)                                 |
 | `webSearchTool`            | string        | Full path to a custom web search script                                                                              |
 | `deepseekSearchApiEnabled` | boolean | Use DeepSeek official web search (default `false`) |
 | `mcpServers`               | object        | MCP server configurations (keys are service names, values are McpServerConfig objects)                               |
@@ -129,16 +129,16 @@ When `BASE_URL` is `https://api.deepseek.com`, enabling `filesApiEnabled` upload
 
 Each file is limited to 64 MiB, and the upload timeout cannot exceed 10 minutes. Remote IDs are cached in `~/.deepcode/files-api-cache.json` without storing the plaintext API key. During quota recovery, only the oldest files whose names start with `deepcode-` are removed before one retry.
 
-#### `notify` — Task Completion Notification
+#### `notify` — Task Status Notifications
 
-Set a full path to a shell script. When the AI assistant finishes a round of tasks, the script is executed automatically, which can be used to send notifications (e.g., a Slack message).
+Set a full path to a shell script. When a session completes, fails, waits for user input, or waits for permission approval, the script is executed automatically to send notifications (e.g., a Slack message). After the session resumes, another notification is sent when it pauses or ends again.
 
 The following context is injected as environment variables when the notify script runs:
 
 | Variable      | Description                                     |
 | ------------- | ----------------------------------------------- |
-| `DURATION`    | Session duration in seconds (integer)           |
-| `STATUS`      | Session status: `"completed"` or `"failed"`     |
+| `DURATION`    | Elapsed time from the start of the current execution until it pauses or ends, in whole seconds; resets when execution resumes           |
+| `STATUS`      | Actual session status: `completed`, `failed`, `waiting_for_user` (waiting for user input), or `ask_permission` (waiting for permission approval)     |
 | `FAIL_REASON` | Failure reason (only set on failure)            |
 | `BODY`        | The text content of the last AI assistant reply |
 | `TITLE`       | Session title (matches the resume list title)   |
